@@ -15,6 +15,7 @@ find_package(Threads REQUIRED)
 set(STARSCAPE_SOURCES
 	src/noise.cpp
 	src/population.cpp
+	src/galaxy.cpp
 	src/presets.cpp
 )
 
@@ -33,6 +34,7 @@ set(STARSCAPE_TESTS
 	tests/test_rng.cpp
 	tests/test_noise.cpp
 	tests/test_format.cpp
+	tests/test_galaxy.cpp
 	tests/test_population.cpp
 )
 add_executable(starscape-tests ${STARSCAPE_TESTS})
