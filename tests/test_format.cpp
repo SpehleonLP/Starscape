@@ -72,6 +72,7 @@ TEST_CASE("Every truncation is rejected")
 
 TEST_CASE("Each header defect is named")
 {
+	// Mutation: dropping the region-overlap check reddens this test.
 	CHECK(ParseMutated([](Header& h) { h.magic ^= 1u; }) == Result::BadMagic);
 	CHECK(ParseMutated([](Header& h) { h.version = 2; }) == Result::BadVersion);
 	CHECK(ParseMutated([](Header& h) { h.diffuseEncoding = uint32_t(Encoding::BC6H); }) == Result::BadEncoding);
@@ -108,6 +109,7 @@ TEST_CASE("Accessors read the documented byte positions")
 
 TEST_CASE("RGB9E5 encodes the reference values")
 {
+	// Mutation: a wrong exponent bias reddens this test.
 	CHECK(EncodeRGB9E5(1.0f, 1.0f, 1.0f) == 0x84020100u);
 	CHECK(EncodeRGB9E5(kRGB9E5Max, kRGB9E5Max, kRGB9E5Max) == 0xFFFFFFFFu);
 	CHECK(EncodeRGB9E5(1.0e9f, 0.0f, 0.0f) == EncodeRGB9E5(kRGB9E5Max, 0.0f, 0.0f));

@@ -35,6 +35,7 @@ TEST_CASE("Arm proximity peaks on the arm and falls as a Gaussian of arc length"
 
 TEST_CASE("Evaluation at the centre and on the axis is finite")
 {
+	// Mutation: removing the axis guard reddens this test.
 	std::vector<Population> const populations = PresetPopulations();
 	for (char const* name : {"milky-way", "small-spiral", "elliptical", "dwarf"})
 	{
@@ -52,6 +53,7 @@ TEST_CASE("Evaluation at the centre and on the axis is finite")
 
 TEST_CASE("The bulge integrates to the Hernquist total")
 {
+	// Mutation: a wrong Hernquist power reddens this test.
 	Galaxy galaxy;
 	galaxy.bulge = {.enabled = true, .density = 1000.0, .scale = 500.0, .axisY = 1.0, .axisZ = 1.0, .barAngleDeg = 0.0, .cutoff = 5000.0, .population = 0};
 	// ∫₀^{10a} 4π r² n_b a / (r (r + a)³) dr = 4π n_b × 100 / 242.
@@ -104,6 +106,7 @@ TEST_CASE("Arms split the thin disk between its old and young populations")
 
 TEST_CASE("Rotation maps scene positions into the galaxy frame")
 {
+	// Mutation: dropping the transpose or reordering the axes reddens this test.
 	Galaxy galaxy;
 	galaxy.disk = {.enabled = true, .density = 1.0, .scaleLength = 3000.0, .scaleHeight = 300.0, .cutoff = 30000.0,
 		.arms = {.count = 2, .pitchDeg = 15.0, .width = 300.0, .contrast = 3.0, .clumping = 0.0, .phaseDeg = 0.0, .r0 = 1000.0},

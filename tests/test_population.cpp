@@ -18,6 +18,7 @@ TEST_CASE("Luminosity bins are log-spaced with geometric centres")
 
 TEST_CASE("Preset populations are normalised and keep their derived mean luminosity")
 {
+	// Mutation: a mistyped bin fraction reddens this test.
 	std::vector<Population> const presets = PresetPopulations();
 	REQUIRE(presets.size() == 4);
 	CHECK(presets[0].name == "young-disk");

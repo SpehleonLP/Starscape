@@ -28,6 +28,7 @@ std::vector<uint8_t> SkyFile(std::vector<glm::dvec3>&& diffuse, uint32_t faceSiz
 
 TEST_CASE("A splatted star keeps its exact flux at every latitude")
 {
+	// Mutation: omitting the per-pixel solid-angle divide reddens this test.
 	for (double const latitude : {0.0, 60.0, 85.0})
 	{
 		double const b = latitude * kPi / 180.0;
@@ -65,6 +66,7 @@ TEST_CASE("Pixel solid angles cover the sphere")
 
 TEST_CASE("The diffuse layer is sampled without seams")
 {
+	// Mutation: clamping at face edges instead of fetching the neighbouring face reddens this test.
 	// Radiance 2 + x + z everywhere (offset keeps it positive): a smooth field with a gradient across every
 	// face edge, so any seam mistake shows as an outlier.
 	constexpr uint32_t size = 8;
@@ -111,6 +113,7 @@ TEST_CASE("Radiance RGBE encoding")
 
 TEST_CASE("Radiance encoding survives NaN, infinity and near-power-of-two values")
 {
+	// Mutation: removing the sanitise step reddens this test.
 	float const nan = std::numeric_limits<float>::quiet_NaN();
 	float const inf = std::numeric_limits<float>::infinity();
 	Image image{3, 1, {nan, inf, -1.0f, 0.99999f, 0.99999f, 0.5f, nan, -2.0f, nan}};

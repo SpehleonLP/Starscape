@@ -36,7 +36,9 @@ preview), `[observer]` (position in parsecs, spin axis, zero meridian) and one o
 `[[galaxy]]` tables starting from a preset (`milky-way`, `small-spiral`, `elliptical`,
 `dwarf`) with any field overridden. Unknown keys are errors. See
 [`scenes/milky-way-from-earth.toml`](scenes/milky-way-from-earth.toml) for an example and
-[`docs/spec.md`](docs/spec.md) for every key, formula and unit.
+[`docs/spec.md`](docs/spec.md) for the model, formulas and units. The spec describes the main keys; every
+accepted key, its range and its preset default is defined in [`src/scene.cpp`](src/scene.cpp), and
+[`scenes/`](scenes/) shows them in use.
 
 ## Units
 

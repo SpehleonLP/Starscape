@@ -5,6 +5,7 @@ using namespace starscape;
 
 TEST_CASE("Philox4x32-10 matches the Random123 known-answer vectors")
 {
+	// Mutation: a wrong Philox multiplier reddens this test.
 	CHECK(Philox4x32_10({0u, 0u, 0u, 0u}, {0u, 0u}) == PhiloxCounter{0x6627e8d5u, 0xe169c58du, 0xbc57ac4cu, 0x9b00dbd8u});
 	CHECK(Philox4x32_10({~0u, ~0u, ~0u, ~0u}, {~0u, ~0u}) == PhiloxCounter{0x408f276du, 0x41c83b0eu, 0xa20bc7c6u, 0x6d5451fdu});
 	CHECK(Philox4x32_10({0x243f6a88u, 0x85a308d3u, 0x13198a2eu, 0x03707344u}, {0xa4093822u, 0x299f31d0u})

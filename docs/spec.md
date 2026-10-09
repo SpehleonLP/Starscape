@@ -183,14 +183,33 @@ traces `spp` stratified, jittered directions within the texel (spp = 16 at
    intervals. Gaps between intervals are empty: no emission, no dust.
 2. Within each interval, step from s_start = max(s_min, interval start) with
    step ds = clamp(α · s, ds_min, ds_max) (α = 0.02, ds_min = 0.01 pc,
-   ds_max = 5 pc at `final`; α = 0.1, ds_max = 50 pc at `quick`), evaluating
-   at the midpoint of each step.
-3. Maintain T_c(s) by integrating α_V with the same steps.
-4. At each step, for each galaxy component and each bin i:
-   - if resolved: add n(x) · f_i · s² · dΩ_sample · ds to the texel's **point
-     budget** B[texel][i], where dΩ_sample is the texel's solid angle / spp;
-   - otherwise: add j_i(x) · T_c(s) · chroma_i,c · ds / spp to the texel's
-     **diffuse radiance**, channel c.
+   ds_max = 5 pc at `final`; α = 0.1, ds_max = 50 pc at `quick`). Density n,
+   chroma and the extinction rate are evaluated once, at the step's midpoint,
+   and held constant across the step [a, b]; distance is integrated exactly
+   inside it.
+3. Maintain T_c by integrating α_V with the same steps; a step's T_c is its
+   value at the midpoint, again constant across the step.
+4. For each galaxy component and bin i, the star of luminosity L_i is resolved
+   out to c_i = sqrt(L_i · T_V · 100 · 10^(−1.932) / F_res), clipped to [a, b].
+   Bins whose c_i falls inside the step **straddle** it:
+   - resolved part [a, c_i]: add n(x) · f_i · dΩ_sample · (c_i³ − a³) / 3 to the
+     texel's **point budget** B[texel][i] (the cube law: a volume element holds
+     n s² dΩ ds stars), where dΩ_sample is the texel's solid angle / spp;
+   - diffuse part [c_i, b]: add j_i(x) · T_c · chroma_i,c · (b − c_i) / spp to the
+     texel's **diffuse radiance**, channel c (the s² cancels against each star's
+     1/s², so radiance is linear in distance);
+   - a bin resolved over the whole step contributes only to the budget, with
+     c_i = b; one resolved nowhere contributes only to the diffuse radiance.
+
+   Classification, budget and diffuse remainder all use the same c_i, so a step's
+   light is split between points and diffuse without loss, however the step grid
+   falls; a once-per-step decision at the midpoint would quantise the boundary to
+   the grid and ripple the star counts by several percent.
+
+   The calibration pass applies the same clipping to its histogram: each step is
+   cut into sub-bucket pieces, about four per histogram bucket the step spans, each deposited
+   at its own midpoint flux with its cube-law count, so counts follow the
+   F^(−3/2) law without ripples.
 
 s_min defaults to 0.05 pc so the observer's own star system is excluded; the
 engine draws its own sun. The march ends at the last interval's exit.
@@ -203,15 +222,22 @@ drawn star:
 - its direction is uniform in the texel's solid angle (rejection-sampled on the
   cube face against the solid-angle Jacobian);
 - its distance is sampled by **re-marching that direction** and inverting the
-  cumulative resolved count along it for bin i (linear within a march step; a
-  star the interpolation leaves a hair under F_res is raised to F_res) (only drawn stars re-march, so
-  memory stays at one float per texel per bin, 37 MB at S = 256);
+  cumulative resolved count along it for bin i. Inside the step that holds the
+  quantile the count is a cube law, so the distance is the cube root of
+  a³ + q · (c_i³ − a³), q being the quantile's share of that step's resolved
+  count; a star the floating-point
+  inversion leaves a hair under F_res is raised to F_res. Only drawn stars
+  re-march, so memory stays at one float per texel per bin, 37 MB at S = 256;
 - its luminosity is the bin's L_i — the same value the classification used, so
   the star is resolved at its sampled distance by construction and the split is
   exact at the threshold (apparent magnitudes are still continuous, since
   distance and dust vary continuously);
 - its flux is the formula of *Normalisation* with T_c at the sampled distance,
   giving a reddened RGB flux.
+
+A cook whose expected star count exceeds 10⁷ (the bound `target_stars` has) is
+refused as an input error naming `limiting_magnitude` and the count, before any
+star is drawn.
 
 Points plus diffuse equal the full sky's light in expectation. Lowering
 `target_stars` moves light from points to diffuse; it never loses light.
@@ -387,6 +413,9 @@ recorded in the test's comment.
 | Distant galaxy | Dust-free galaxy at 1 Mpc: total sky flux = Σ L · (10/d)² · 10^(−1.932) within 1 % | restore an unbounded density term |
 | Dust slab | Uniform slab of optical depth τ in front of a point source: per-channel flux ratio = exp(−k_c τ) within 0.5 % | apply k_G to all channels |
 | Inside a disk | Milky Way, observer at R = 8.2 kpc, z = 20 pc, 20 000 stars: mean diffuse radiance within 5° of the galactic plane ≥ 2.5× within 5° of the poles (the in-plane column is dust-limited to ~1/α ≈ 1 kpc against a polar column of 2h ≈ 600 pc plus the thick disk, so a ratio of 2–4 is expected; a flat disk inverts it, measured 0.075); point density per steradian within 10° of the plane vs above 60° latitude in [1.15, 4] (wider bands than the diffuse check so the counts are not noise-limited; a flat disk gives 0.85, dust thinning the plane) | replace the sech² with 1 |
+| Straddling-step conservation | One Milky Way ray: diffuse radiance + the expected light of the resolved points equals the all-diffuse radiance to 10⁻⁹, at thresholds 10⁻²…10⁻⁶ | drop the diffuse part beyond c_i of a straddling bin |
+| Orientation | A compact source along (0.3, 0.8, 0.52): the brightest diffuse texel (by the file's face table), the brightest preview pixels and the file's stars all lie on that direction | swap x and y when mapping a texel index to face coordinates |
+| Star-count bound | A tiny scene at `limiting_magnitude` = 25 is refused, quickly, naming the magnitude | remove the post-march bound |
 | Determinism | Quick cook with 1 thread and with 8 threads: byte-identical files | seed draws by thread index |
 | Format round trip | Write then `Parse`: every field and payload byte equal | — |
 | Format rejection | `Parse` rejects every truncation length, each offset/size pushed past EOF, overlapping regions, bad magic/version/encoding, mip count inconsistent with face size | delete any one validation check |

@@ -180,18 +180,22 @@ void MarchRay(PreparedScene const& scene, MarchParams const& params, glm::dvec3 
 			int const splitB = FirstResolvedBin(population, MinResolvedLuminosity(fluxThreshold, step, step.b));
 			// n s^2 dOmega ds stars at flux 100 L C / s^2 each: the s^2 cancels, leaving radiance 100 n L C ds.
 			out.radiance += (weight * part.density * 100.0 * kFluxAt10pc * step.ds) * (step.transmittance * population.lightBelow[size_t(splitA)]);
+			double const lightScale = weight * part.density * 100.0 * kFluxAt10pc;
 			for (int bin = splitA; bin < splitB; ++bin)
 			{
 				// Resolved out to c, diffuse beyond it.
 				double const c = std::clamp(ResolvedDistance(fluxThreshold, step, population.luminosity[size_t(bin)]), step.a, step.b);
 				double const f = population.fraction[size_t(bin)];
+				glm::dvec3 const binLight = step.transmittance * population.chroma[size_t(bin)] * (f * population.luminosity[size_t(bin)]);
 				out.budget[size_t(bin)] += part.density * f * sampleSolidAngle * CubeSpan(step.a, c);
-				out.radiance += (weight * part.density * 100.0 * kFluxAt10pc * f * population.luminosity[size_t(bin)] * (step.b - c))
-					* (step.transmittance * population.chroma[size_t(bin)]);
+				out.radiance += (lightScale * (step.b - c)) * binLight;
+				out.resolvedRadiance += (lightScale * (c - step.a)) * binLight;
 			}
 			for (int bin = splitB; bin < kBins; ++bin)
 			{
-				out.budget[size_t(bin)] += part.density * population.fraction[size_t(bin)] * sampleSolidAngle * CubeSpan(step.a, step.b);
+				double const f = population.fraction[size_t(bin)];
+				out.budget[size_t(bin)] += part.density * f * sampleSolidAngle * CubeSpan(step.a, step.b);
+				out.resolvedRadiance += (lightScale * step.ds) * (step.transmittance * population.chroma[size_t(bin)] * (f * population.luminosity[size_t(bin)]));
 			}
 		}
 	});

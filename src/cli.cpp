@@ -104,17 +104,17 @@ std::optional<std::string> ParseArguments(int argc, char** argv, Arguments& out)
 			}
 			else if (arg == "--threads")
 			{
-				if (!ParseNumber(*v, out.threads) || out.threads == 0)
+				if (!ParseNumber(*v, out.threads) || out.threads == 0 || out.threads > 256)
 				{
-					return "--threads needs a positive integer";
+					return "--threads needs an integer from 1 to 256";
 				}
 			}
 			else if (arg == "--width")
 			{
 				uint32_t width = 0;
-				if (!ParseNumber(*v, width) || width < 16 || width % 2 != 0)
+				if (!ParseNumber(*v, width) || width < 16 || width > 65536 || width % 2 != 0)
 				{
-					return "--width needs an even integer >= 16";
+					return "--width needs an even integer from 16 to 65536";
 				}
 				out.width = width;
 			}
@@ -188,7 +188,12 @@ int Cook(Arguments const& args)
 		}
 		Log(std::format("{} {}%{}", phase, percent, eta));
 	};
-	Cooked const cooked = starscape::Cook(*scene, options);
+	Expected<Cooked> const result = starscape::Cook(*scene, options);
+	if (!result)
+	{
+		return Report(result.error());
+	}
+	Cooked const& cooked = *result;
 	std::vector<uint8_t> const bytes = BuildFile(cooked, scene->hash);
 	if (Expected<void> const written = WriteFileAtomic(std::string(*args.output), bytes); !written)
 	{

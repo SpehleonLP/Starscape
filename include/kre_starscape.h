@@ -308,6 +308,10 @@ inline Result Parse(std::span<uint8_t const> file, View& out)
 }
 
 // The payload need not be 4-byte aligned in the caller's buffer, so reads go through memcpy.
+// Caller contract for DiffuseTexel and StarAt: Parse validates the header and region bounds, not the indices
+// passed here. The caller must pass mip < header.diffuseMipCount, face < 6, x and y < (diffuseFaceSize >> mip),
+// and index < header.starCount; anything else reads outside the view. They stay unchecked because they sit on
+// per-texel loops.
 inline uint32_t DiffuseTexel(View const& view, uint32_t mip, uint32_t face, uint32_t x, uint32_t y)
 {
 	uint32_t const size = view.header.diffuseFaceSize >> mip;

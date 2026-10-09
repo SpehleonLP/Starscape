@@ -50,6 +50,9 @@ struct RayResult
 {
 	glm::dvec3                radiance{0.0};   // mag-0 flux per steradian, linear Rec.709
 	std::array<double, kBins> budget{};        // expected resolved stars per luminosity bin
+	// The expected light of those resolved stars, in radiance units. Not used by the cook; it exists so the
+	// split can be checked exactly: radiance + resolvedRadiance is the same with any threshold.
+	glm::dvec3                resolvedRadiance{0.0};
 };
 
 // Adds `weight` × this ray's diffuse radiance and its point budget over `sampleSolidAngle` to `out`.

@@ -48,6 +48,7 @@ void ExpectClose(glm::dvec3 actual, glm::dvec3 expected)
 
 TEST_CASE("Mips are solid-angle-weighted means")
 {
+	// Mutation: unweighted mips reddens this test.
 	std::vector<glm::dvec3> level0(6 * 4 * 4, glm::dvec3(0.0));
 	level0[0] = {4.0, 0.0, 0.0};   // face 0, texel (0,0): a corner of the face
 	auto const levels = BuildMips(4, level0);
@@ -126,6 +127,7 @@ TEST_CASE("A dark sky keeps its precision")
 
 TEST_CASE("The value scale is a power of two that keeps the maximum in range")
 {
+	// Mutation: the unclamped exponent cast reddens this test.
 	for (double const maxValue : {1e-9, 0.37, 1.0, 400.0, 1e7})
 	{
 		float const scale = ChooseValueScale(maxValue);
@@ -143,14 +145,16 @@ TEST_CASE("The value scale is a power of two that keeps the maximum in range")
 
 TEST_CASE("Cooks are byte-identical on any thread count")
 {
+	// Mutation: seeding draws by thread index reddens this test.
 	Scene const scene = MilkyWayScene({8200.0, 0.0, 20.0});   // limiting magnitude 6, face 16, quick
-	std::vector<uint8_t> const one = BuildFile(Cook(scene, {.threads = 1}), scene.hash);
-	std::vector<uint8_t> const many = BuildFile(Cook(scene, {.threads = 8}), scene.hash);
+	std::vector<uint8_t> const one = BuildFile(Cook(scene, {.threads = 1}).value(), scene.hash);
+	std::vector<uint8_t> const many = BuildFile(Cook(scene, {.threads = 8}).value(), scene.hash);
 	CHECK(one == many);
 }
 
 TEST_CASE("Writes land atomically")
 {
+	// Mutation: leaving the .partial file behind reddens this test.
 	std::filesystem::path const dir = std::filesystem::temp_directory_path() / std::format("starscape-writer-test-{}", getpid());
 	std::filesystem::remove_all(dir);
 	std::filesystem::create_directories(dir);

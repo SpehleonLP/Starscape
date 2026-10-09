@@ -1,4 +1,5 @@
 #pragma once
+#include "common.h"
 #include "march.h"
 #include "rng.h"
 #include "scene.h"
@@ -42,7 +43,13 @@ struct CookOptions
 	std::function<void(std::string_view phase, double done)> progress{};
 };
 
-Cooked Cook(Scene const& scene, CookOptions const& options);
+// Same bound as the scene's target_stars. Past it a cook takes hours and writes a file nobody can load into a
+// sky, and the per-texel-bin star index would outgrow the 24 bits the random stream gives it.
+inline constexpr double kMaxStars = 1.0e7;
+inline constexpr double kMaxStarsPerTexelBin = double(1u << 24) - double(1u << 20);
+
+// An input error when the threshold would resolve more than kMaxStars points.
+Expected<Cooked> Cook(Scene const& scene, CookOptions const& options);
 
 FluxHistogram CalibrationHistogram(PreparedScene const& scene, MarchParams const& params, uint32_t faceSize, unsigned threads);
 uint32_t SamplePoisson(double lambda, RandomStream& rng);

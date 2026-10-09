@@ -46,7 +46,8 @@ std::vector<Population> PresetPopulations()
 }
 
 // Milky Way numbers: thin disk 0.1 stars/pc³ at the Sun's 8.2 kpc (n₀ = 0.1 e^{8200/2600});
-// thick disk ~6 % of that locally; bulge ≈ 2 × 10¹⁰ stars (n_b = N / 2π) with a 25° bar;
+// thick disk ~6 % of that locally; bulge n_b = 3.2 × 10⁹ (a spherical bulge would hold 2π n_b = 2 × 10¹⁰ stars; the 0.5 × 0.4 bar axes
+// scale that by 0.2 to ≈ 4 × 10⁹, ≈ 3.3 × 10⁹ inside the 6 kpc cutoff) with a 25° bar;
 // halo ≈ 10⁻⁴ stars/pc³ locally; dust ≈ 1 mag/kpc locally (α₀ = 0.001 e^{8200/3200}).
 std::optional<Galaxy> PresetGalaxy(std::string_view name, std::span<Population const> populations)
 {

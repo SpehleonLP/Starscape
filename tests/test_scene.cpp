@@ -51,6 +51,7 @@ TEST_CASE("A minimal scene takes its preset and applies overrides")
 
 TEST_CASE("Unknown keys are errors with a position")
 {
+	// Mutation: disabling unknown-key rejection reddens this test.
 	std::string const message = ErrorOf("[output]\nface_sise = 256\ntarget_stars = 10\n[observer]\nposition = [0.0, 0.0, 0.0]\n[[galaxy]]\npreset = \"dwarf\"\n");
 	CHECK(message.find("test.toml:2:") != std::string::npos);
 	CHECK(message.find("output.face_sise") != std::string::npos);

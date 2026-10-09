@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <format>
 #include <glm/geometric.hpp>
 
 namespace starscape
@@ -65,7 +66,10 @@ uint32_t SamplePoisson(double lambda, RandomStream& rng)
 	double const u1 = std::max(rng.NextDouble(), 1e-300);
 	double const u2 = rng.NextDouble();
 	double const z = std::sqrt(-2.0 * std::log(u1)) * std::cos(kTwoPi * u2);
-	return uint32_t(std::max(0.0, std::floor(lambda + std::sqrt(lambda) * z + 0.5)));
+	// Converting a double outside uint32_t's range is undefined, and an infinite λ would make the sum NaN, so
+	// λ is capped (below the type's maximum, leaving room for the normal's spread) before the cast.
+	double const capped = std::min(lambda, 4.2e9);
+	return uint32_t(std::clamp(std::floor(capped + std::sqrt(capped) * z + 0.5), 0.0, 4294967295.0));
 }
 
 glm::dvec3 SampleTexelDirection(uint32_t faceSize, uint32_t texel, RandomStream& rng)
@@ -112,7 +116,7 @@ FluxHistogram CalibrationHistogram(PreparedScene const& scene, MarchParams const
 	return total;
 }
 
-Cooked Cook(Scene const& scene, CookOptions const& options)
+Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 {
 	Quality const quality = options.quality.value_or(scene.output.quality);
 	MarchParams const params = ParamsFor(quality);
@@ -174,6 +178,29 @@ Cooked Cook(Scene const& scene, CookOptions const& options)
 			budget[texel][size_t(bin)] = float(result.budget[size_t(bin)]);
 		}
 	}, [&](uint32_t done) { report("march", done, texels); });
+
+	// The budget is known before any star is drawn, so an absurd threshold fails here rather than hours later.
+	double expectedStars = 0.0;
+	double largestBin = 0.0;
+	for (std::array<float, kBins> const& texelBudget : budget)
+	{
+		for (float const count : texelBudget)
+		{
+			expectedStars += double(count);
+			largestBin = std::max(largestBin, double(count));
+		}
+	}
+	double const magnitude = -2.5 * std::log10(cooked.fluxThreshold);
+	if (!(expectedStars <= kMaxStars))
+	{
+		return InputError(std::format("limiting_magnitude {:.2f} resolves about {:.3g} stars, over the {:.0f} limit; use a smaller limiting_magnitude or target_stars",
+			magnitude, expectedStars, kMaxStars));
+	}
+	if (!(largestBin <= kMaxStarsPerTexelBin))
+	{
+		return InputError(std::format("limiting_magnitude {:.2f} puts about {:.3g} stars of one luminosity bin in one texel, over the {:.0f} per-texel limit; use a smaller limiting_magnitude",
+			magnitude, largestBin, kMaxStarsPerTexelBin));
+	}
 
 	// 3. Stars: Poisson counts from the budget, each placed by re-marching its own direction.
 	std::vector<std::vector<CookedStar>> perTexel(texels);

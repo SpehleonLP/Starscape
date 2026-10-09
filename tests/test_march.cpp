@@ -68,6 +68,7 @@ TEST_CASE("Ray intervals clip, merge and skip")
 
 TEST_CASE("Counts in a uniform medium follow the Euclidean F^-3/2 law")
 {
+	// Mutation: dropping the s² in the point budget, or depositing once per step in the histogram reddens this test.
 	Scene scene = BaseScene();
 	int const bin = 12;
 	int const population = AddSingleBinPopulation(scene, bin);
@@ -109,6 +110,7 @@ TEST_CASE("Counts in a uniform medium follow the Euclidean F^-3/2 law")
 
 TEST_CASE("A distant dust-free galaxy delivers L (10/d)² C in total")
 {
+	// Mutation: restoring an unbounded density term reddens this test.
 	Scene scene = BaseScene();
 	int const bin = 14;
 	int const population = AddSingleBinPopulation(scene, bin);
@@ -133,6 +135,7 @@ TEST_CASE("A distant dust-free galaxy delivers L (10/d)² C in total")
 
 TEST_CASE("A uniform dust ball dims each channel by exp(-k tau)")
 {
+	// Mutation: applying one channel's extinction to all channels reddens this test.
 	Scene scene = BaseScene();
 	int const population = AddSingleBinPopulation(scene, 14);
 	Galaxy source;
@@ -175,6 +178,30 @@ TEST_CASE("Points and diffuse split one ray's light without loss")
 			pointCount += count;
 		}
 		CHECK(pointCount > 0.0);
+	}
+}
+
+TEST_CASE("Diffuse plus resolved light of one ray is the same at every threshold")
+{
+	// Mutation: replacing (step.b - c) with 0 in the straddling bins' diffuse radiance (march.cpp) loses the part of
+	// each bin's light beyond its resolved distance and reddens this; the totals-only tests miss it (second order).
+	Scene scene = MilkyWayScene({8200.0, 0.0, 20.0});
+	PreparedScene const prepared = PrepareScene(scene);
+	MarchParams const params = ParamsFor(Quality::Quick);
+	glm::dvec3 const dir = glm::normalize(glm::dvec3(-1.0, 0.1, 0.02));
+	RayResult allDiffuse;
+	MarchRay(prepared, params, dir, HUGE_VAL, 1.0, 1.0, allDiffuse);
+	CHECK(allDiffuse.resolvedRadiance == glm::dvec3(0.0));
+	for (double const threshold : {1e-2, 1e-4, 1e-6})
+	{
+		RayResult split;
+		MarchRay(prepared, params, dir, threshold, 1.0, 1.0, split);
+		CHECK(Luminance(split.resolvedRadiance) > 0.0);
+		CHECK(Luminance(split.radiance) > 0.0);
+		glm::dvec3 const total = split.radiance + split.resolvedRadiance;
+		CHECK(total.x == doctest::Approx(allDiffuse.radiance.x).epsilon(1e-9));
+		CHECK(total.y == doctest::Approx(allDiffuse.radiance.y).epsilon(1e-9));
+		CHECK(total.z == doctest::Approx(allDiffuse.radiance.z).epsilon(1e-9));
 	}
 }
 
