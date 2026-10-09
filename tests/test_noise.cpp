@@ -1,0 +1,52 @@
+#include "noise.h"
+#include "rng.h"
+#include <doctest.h>
+#include <algorithm>
+#include <cmath>
+
+using namespace starscape;
+
+TEST_CASE("Gradient noise is zero on the lattice and deterministic")
+{
+	CHECK(GradientNoise({3.0, -2.0, 7.0}, 5) == 0.0);
+	glm::dvec3 const p(0.3, 1.7, -2.2);
+	CHECK(GradientNoise(p, 5) == GradientNoise(p, 5));
+	CHECK(GradientNoise(p, 5) != GradientNoise(p, 6));
+}
+
+TEST_CASE("Fbm stays bounded with a near-zero mean")
+{
+	RandomStream rng(3, Purpose::Test, 0, 0, 0);
+	constexpr int n = 100000;
+	double sum = 0.0;
+	double extreme = 0.0;
+	for (int i = 0; i < n; ++i)
+	{
+		glm::dvec3 const p(rng.NextDouble() * 1000.0 - 500.0, rng.NextDouble() * 1000.0 - 500.0, rng.NextDouble() * 1000.0 - 500.0);
+		double const v = Fbm(p, 6, 11);
+		sum += v;
+		extreme = std::max(extreme, std::abs(v));
+	}
+	CHECK(extreme <= 1.1);
+	CHECK(extreme > 0.3);
+	CHECK(std::abs(sum / n) < 0.02);
+}
+
+// The earlier experiment hashed with fract(sin(dot(p, k)) * 43758) in single precision,
+// which collapses at coordinates like 250 000. Noise here must still vary there.
+TEST_CASE("Noise keeps its variance at galactic coordinates")
+{
+	RandomStream rng(4, Purpose::Test, 0, 0, 0);
+	constexpr int n = 2000;
+	double sum = 0.0;
+	double sumSquares = 0.0;
+	for (int i = 0; i < n; ++i)
+	{
+		glm::dvec3 const p(250000.0 + rng.NextDouble() * 10.0, 1.0e6 + rng.NextDouble() * 10.0, rng.NextDouble() * 10.0);
+		double const v = Fbm(p, 4, 9);
+		sum += v;
+		sumSquares += v * v;
+	}
+	double const mean = sum / n;
+	CHECK(sumSquares / n - mean * mean > 0.01);
+}

@@ -1,0 +1,4 @@
+toml.hpp      tomlplusplus v3.4.0   https://raw.githubusercontent.com/marzer/tomlplusplus/v3.4.0/toml.hpp   sha256 6b5172ad4dd6519aec67b919181fa7a38a2234131e5b2afa232dfe444819783e
+doctest.h     doctest v2.4.11       https://raw.githubusercontent.com/doctest/doctest/v2.4.11/doctest/doctest.h   sha256 44faa038e9c3f9728efbda143748d01124ea0a27f4bf78f35a15d8fab2e039fb
+glm/          glm 1.0.1 (light)     https://github.com/g-truc/glm/releases/download/1.0.1/glm-1.0.1-light.zip   sha256 9a995de4da09723bd33ef194e6b79818950e5a8f2e154792f02e4615277cfb8d
+              (glm/copying.txt from https://raw.githubusercontent.com/g-truc/glm/1.0.1/copying.txt sha256 62d2d642c7d054d4fb4c9b42faad617d6c88fcd91e317f8035aa9f277cc159c3)
