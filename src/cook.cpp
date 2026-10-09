@@ -193,12 +193,12 @@ Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 	double const magnitude = -2.5 * std::log10(cooked.fluxThreshold);
 	if (!(expectedStars <= kMaxStars))
 	{
-		return InputError(std::format("limiting_magnitude {:.2f} resolves about {:.3g} stars, over the {:.0f} limit; use a smaller limiting_magnitude or target_stars",
+		return InputError(std::format("the resolution threshold (magnitude {:.2f}) resolves about {:.3g} stars, over the {:.0f} limit; lower limiting_magnitude or target_stars",
 			magnitude, expectedStars, kMaxStars));
 	}
 	if (!(largestBin <= kMaxStarsPerTexelBin))
 	{
-		return InputError(std::format("limiting_magnitude {:.2f} puts about {:.3g} stars of one luminosity bin in one texel, over the {:.0f} per-texel limit; use a smaller limiting_magnitude",
+		return InputError(std::format("the resolution threshold (magnitude {:.2f}) puts about {:.3g} stars of one luminosity bin in one texel, over the {:.0f} per-texel limit; lower limiting_magnitude or target_stars, or raise face_size",
 			magnitude, largestBin, kMaxStarsPerTexelBin));
 	}
 

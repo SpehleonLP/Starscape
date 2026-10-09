@@ -302,7 +302,7 @@ TEST_CASE("A limiting magnitude that resolves too many stars is rejected up fron
 	Expected<Cooked> const cooked = Cook(scene, {.threads = Threads()});
 	REQUIRE_FALSE(cooked.has_value());
 	CHECK(cooked.error().kind == Error::Kind::Input);
-	CHECK(cooked.error().message.find("limiting_magnitude 25.00") != std::string::npos);
+	CHECK(cooked.error().message.find("magnitude 25.00") != std::string::npos);
 	CHECK(cooked.error().message.find("stars") != std::string::npos);
 }
 

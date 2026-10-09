@@ -206,7 +206,7 @@ traces `spp` stratified, jittered directions within the texel (spp = 16 at
    falls; a once-per-step decision at the midpoint would quantise the boundary to
    the grid and ripple the star counts by several percent.
 
-   The calibration pass applies the same clipping to its histogram: each step is
+   The calibration pass subdivides steps for its histogram: each step is
    cut into sub-bucket pieces, about four per histogram bucket the step spans, each deposited
    at its own midpoint flux with its cube-law count, so counts follow the
    F^(−3/2) law without ripples.
