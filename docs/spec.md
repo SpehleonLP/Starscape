@@ -89,14 +89,22 @@ radius R is θ_k(R) = φ₀ + 2πk/m + ln(R / R₀) / tan ψ. Let d be the dista
 (R, φ) to the nearest arm, measured along the circle of radius R (arc length,
 parsecs). Then
 
-    A = 1 + (contrast − 1) · exp(−d² / 2w²) · (1 + clumping · fbm(x))
+    C = exp(clumping · fbm(x))
+    A = 1 + (contrast − 1) · exp(−d² / 2w²) · C
 
 clamped to ≥ 0, where w is the arm width and fbm is 4-octave gradient noise in
-the galaxy frame (base wavelength = w), seeded by the galaxy's seed. The arm
-fraction a = exp(−d² / 2w²) also blends the thin disk's population: weight
-`arm_young_fraction` × a (default 0.05) goes to its `arm_population`
-(`young-disk`), the rest to its `population` (`old-disk`). Young stars are a small
-share by number but, at ~26× the mean luminosity, dominate an arm's light.
+the galaxy frame (base wavelength = w), seeded by the galaxy's seed. C is
+log-normal so clumping opens gaps between star clouds rather than rippling the
+crest. The arm fraction a = exp(−d² / 2w²) also blends the thin disk's
+population: at the midplane, weight y = min(1, `arm_young_fraction` × a × C) goes
+to its `arm_population` (`young-disk`), the rest to its `population`
+(`old-disk`). Young stars are a small share by number but, at ~26× the mean
+luminosity, dominate an arm's light. The two parts have their own vertical
+profiles: the old part n₀ e^{−R/R_d} A (1 − y) sech²(z / 2h), the young part
+n₀ e^{−R/R_d} A y sech²(z / 2h_arm) with h_arm = `arm_scale_height` (0: h).
+Young stars have not been heated out of the plane; giving them the old disk's
+thickness turns each nearby arm into a wall whose tangent draws a hard edge from
+horizon to zenith (seen in the first full cook).
 
 Every component has an explicit `cutoff` radius in parsecs (presets set them).
 The bulge radius r′ is floored at 1 pc so an observer at the core stays finite.
@@ -106,9 +114,10 @@ The bulge radius r′ is floored at 1 pc so an observer at the core stays finite
 Dust is a separate field giving visual extinction per parsec, α_V(x) in
 magnitudes/pc (the solar neighbourhood is about 0.001 mag/pc):
 
-    α_V = α₀ · exp(−R/R_dust) · sech²(z / 2h_dust) · D(R, φ) · (1 + filament · fbm_dust(x))
+    α_V = α₀ · exp(−R/R_dust) · sech²(z / 2h_dust) · D(R, φ) · exp(filament · fbm_dust(x))
 
-clamped to ≥ 0. D is the arm modulation computed with arm phase offset inward by
+The log-normal factor makes dust clouds with clear holes between them, not a
+modulated sheet. D is the arm modulation computed with arm phase offset inward by
 `lane_offset · w` (lanes sit on the inner, concave edge of each arm) and its own
 contrast. fbm_dust has 6 octaves with base wavelength w/2, so lanes break into
 filaments.
@@ -356,12 +365,12 @@ seed     = 1
   [galaxy.disk]
   scale_length = 2600.0
   scale_height = 300.0
-  arms = { count = 4, pitch_deg = 12.0, width = 400.0, contrast = 2.5, clumping = 0.6 }
+  arms = { count = 4, pitch_deg = 12.0, width = 400.0, contrast = 1.5, clumping = 1.2 }
 
   [galaxy.dust]
   scale_height = 100.0
   lane_offset  = 0.15
-  filament     = 0.7
+  filament     = 1.2
 
 [[galaxy]]
 preset   = "small-spiral"

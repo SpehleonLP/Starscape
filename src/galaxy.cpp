@@ -128,15 +128,20 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 		}
 		double const crest = ArmProximity(disk.arms, radius, azimuth, 0.0);
 		double modulation = 1.0;
+		double clumps = 1.0;
 		if (disk.arms.count > 0)
 		{
-			double const clumps = 1.0 + disk.arms.clumping * Fbm(p / disk.arms.width, 4, galaxy.seed);
+			// Log-normal, so clumping opens real gaps between star clouds instead of a ripple on the crest.
+			clumps = std::exp(disk.arms.clumping * Fbm(p / disk.arms.width, 4, galaxy.seed));
 			modulation = std::max(0.0, 1.0 + (disk.arms.contrast - 1.0) * crest * clumps);
 		}
-		double const n = disk.density * std::exp(-radius / disk.scaleLength) * Sech2(p.z / (2.0 * disk.scaleHeight)) * modulation;
-		double const young = disk.armPopulation >= 0 ? disk.armYoungFraction * crest : 0.0;
-		push(n * (1.0 - young), disk.population);
-		push(n * young, disk.armPopulation);
+		double const midplane = disk.density * std::exp(-radius / disk.scaleLength) * modulation;
+		double const young = disk.armPopulation >= 0 ? std::min(1.0, disk.armYoungFraction * crest * clumps) : 0.0;
+		push(midplane * (1.0 - young) * Sech2(p.z / (2.0 * disk.scaleHeight)), disk.population);
+		// Young stars have not yet been heated out of the plane: sharing the old disk's thickness turns
+		// each nearby arm into a wall whose tangent draws a hard edge from horizon to zenith.
+		double const youngHeight = disk.armScaleHeight > 0.0 ? disk.armScaleHeight : disk.scaleHeight;
+		push(midplane * young * Sech2(p.z / (2.0 * youngHeight)), disk.armPopulation);
 	};
 	addDisk(galaxy.disk);
 	addDisk(galaxy.thickDisk);
@@ -167,7 +172,8 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 		double const lane = ArmProximity(arms, radius, azimuth, dust.laneOffset * arms.width);
 		double const laneModulation = 1.0 + (dust.contrast - 1.0) * lane;
 		double const wavelength = 0.5 * (arms.count > 0 ? arms.width : dust.scaleHeight);
-		double const filaments = std::max(0.0, 1.0 + dust.filament * Fbm(p / wavelength, 6, galaxy.seed ^ kDustNoiseSalt));
+		// Log-normal like the clumps: dust is clouds with clear holes between them, not a modulated sheet.
+		double const filaments = std::exp(dust.filament * Fbm(p / wavelength, 6, galaxy.seed ^ kDustNoiseSalt));
 		out.extinction = dust.extinction * std::exp(-radius / dust.scaleLength) * Sech2(p.z / (2.0 * dust.scaleHeight)) * laneModulation * filaments;
 	}
 }

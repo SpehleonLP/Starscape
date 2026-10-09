@@ -15,7 +15,7 @@ struct Arms
 	double pitchDeg  = 12.0;
 	double width     = 400.0;   // Gaussian σ across the arm, parsecs of arc length
 	double contrast  = 1.0;     // density multiplier on the arm's crest
-	double clumping  = 0.0;     // fbm amplitude breaking arms into clumps and spurs
+	double clumping  = 0.0;     // log-amplitude of the fbm that breaks arms into clumps and gaps
 	double phaseDeg  = 0.0;
 	double r0        = 1000.0;
 };
@@ -31,7 +31,8 @@ struct Disk
 	Arms   arms;
 	int    population       = -1;
 	int    armPopulation    = -1;       // -1: arms modulate density only
-	double armYoungFraction = 0.0;      // share of armPopulation on an arm's crest
+	double armYoungFraction = 0.0;      // share of armPopulation on an arm's crest, at the midplane
+	double armScaleHeight   = 0.0;      // the arm population's own scale height; 0: the disk's
 };
 
 // Hernquist profile n_b a / (r' (r' + a)³) over a radius r' stretched along a bar.
@@ -65,7 +66,7 @@ struct Dust
 	double cutoff      = 0.0;
 	double laneOffset  = 0.0;   // lane shift toward each arm's inner edge, in arm widths
 	double contrast    = 1.0;
-	double filament    = 0.0;
+	double filament    = 0.0;   // log-amplitude of the fbm that breaks dust into clouds and holes
 };
 
 struct Galaxy

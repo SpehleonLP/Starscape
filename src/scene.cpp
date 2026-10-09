@@ -301,6 +301,7 @@ Expected<void> ReadDisk(TableReader& parent, std::string_view key, Disk& disk, s
 	{
 		STARSCAPE_TRY(ReadPopulation(reader, "arm_population", populations, disk.armPopulation));
 		STARSCAPE_TRY(reader.Number("arm_young_fraction", disk.armYoungFraction, 0.0, 1.0));
+		STARSCAPE_TRY(reader.Number("arm_scale_height", disk.armScaleHeight, 0.0, kHuge));
 		STARSCAPE_TRY(ReadArms(reader, disk.arms));
 		if (disk.enabled && disk.armYoungFraction > 0.0 && disk.armPopulation < 0)
 		{

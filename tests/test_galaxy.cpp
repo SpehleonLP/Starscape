@@ -104,6 +104,25 @@ TEST_CASE("Arms split the thin disk between its old and young populations")
 	CHECK(TotalDensity(sample) == doctest::Approx(3.0 * std::exp(-radius / 3000.0)));
 }
 
+// Mutation: give the arm population the disk's scale height and the off-plane ratio check fails.
+TEST_CASE("The arm population keeps its own, thinner scale height")
+{
+	Galaxy galaxy;
+	galaxy.disk = {.enabled = true, .density = 1.0, .scaleLength = 3000.0, .scaleHeight = 300.0, .cutoff = 30000.0,
+		.arms = {.count = 2, .pitchDeg = 15.0, .width = 300.0, .contrast = 3.0, .clumping = 0.0, .phaseDeg = 0.0, .r0 = 1000.0},
+		.population = 1, .armPopulation = 0, .armYoungFraction = 0.1, .armScaleHeight = 90.0};
+	double const radius = 5000.0;
+	double const onArm = std::log(radius / 1000.0) / std::tan(15.0 * kPi / 180.0);
+	GalaxySample plane;
+	GalaxySample above;
+	EvaluateLocal(galaxy, {radius * std::cos(onArm), radius * std::sin(onArm), 0.0}, plane);
+	EvaluateLocal(galaxy, {radius * std::cos(onArm), radius * std::sin(onArm), 400.0}, above);
+	REQUIRE(plane.count == 2);
+	REQUIRE(above.count == 2);
+	CHECK(above.parts[0].density / plane.parts[0].density == doctest::Approx(Sech2(400.0 / 600.0)));
+	CHECK(above.parts[1].density / plane.parts[1].density == doctest::Approx(Sech2(400.0 / 180.0)));
+}
+
 TEST_CASE("Rotation maps scene positions into the galaxy frame")
 {
 	// Mutation: dropping the transpose or reordering the axes reddens this test.
