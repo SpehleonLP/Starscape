@@ -303,6 +303,8 @@ Expected<void> ReadDisk(TableReader& parent, std::string_view key, Disk& disk, s
 		STARSCAPE_TRY(reader.Number("arm_young_fraction", disk.armYoungFraction, 0.0, 1.0));
 		STARSCAPE_TRY(reader.Number("arm_scale_height", disk.armScaleHeight, 0.0, kHuge));
 		STARSCAPE_TRY(reader.Number("young_fraction", disk.youngFraction, 0.0, 1.0));
+		STARSCAPE_TRY(reader.Number("association_size", disk.associationSize, 0.0, kHuge));
+		STARSCAPE_TRY(reader.Number("association_clumping", disk.associationClumping, 0.0, 10.0));
 		STARSCAPE_TRY(ReadArms(reader, disk.arms));
 		if (disk.enabled && (disk.armYoungFraction > 0.0 || disk.youngFraction > 0.0) && disk.armPopulation < 0)
 		{
@@ -352,6 +354,25 @@ Expected<void> ReadHalo(TableReader& parent, Halo& halo, std::span<Population co
 	return reader.Finish();
 }
 
+Expected<void> ReadBubble(TableReader& parent, Dust& dust)
+{
+	STARSCAPE_TRY_ASSIGN(table, parent.Table("bubble"));
+	if (table == nullptr)
+	{
+		return {};
+	}
+	STARSCAPE_TRY_ASSIGN(reader, ChildReader(parent, "bubble", *table));
+	STARSCAPE_TRY(reader.Vector("center", dust.bubbleCenter));
+	STARSCAPE_TRY(reader.Number("radius", dust.bubbleRadius, 0.0, kHuge));
+	STARSCAPE_TRY(reader.Number("height", dust.bubbleHeight, 0.0, kHuge));
+	// Either semi-axis left at zero would make a bubble that silently is not there, or divides by zero.
+	if (dust.bubbleRadius <= 0.0 || dust.bubbleHeight <= 0.0)
+	{
+		return reader.Fail("", "needs a positive radius and height");
+	}
+	return reader.Finish();
+}
+
 Expected<void> ReadDust(TableReader& parent, Dust& dust)
 {
 	STARSCAPE_TRY_ASSIGN(table, parent.Table("dust"));
@@ -369,6 +390,7 @@ Expected<void> ReadDust(TableReader& parent, Dust& dust)
 	STARSCAPE_TRY(reader.Number("lane_offset", dust.laneOffset, -5.0, 5.0));
 	STARSCAPE_TRY(reader.Number("contrast", dust.contrast, 0.0, 1000.0));
 	STARSCAPE_TRY(reader.Number("filament", dust.filament, 0.0, 10.0));
+	STARSCAPE_TRY(ReadBubble(reader, dust));
 	STARSCAPE_TRY(CheckUsable(reader, "dust", dust.enabled, 0, dust.cutoff));
 	return reader.Finish();
 }

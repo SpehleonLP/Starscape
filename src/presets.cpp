@@ -40,7 +40,8 @@ std::vector<Population> PresetPopulations()
 // Milky Way numbers: thin disk 0.1 stars/pc³ at the Sun's 8.2 kpc (n₀ = 0.1 e^{8200/2600});
 // thick disk ~6 % of that locally; bulge n_b = 3.2 × 10⁹ (a spherical bulge would hold 2π n_b = 2 × 10¹⁰ stars; the 0.5 × 0.4 bar axes
 // scale that by 0.2 to ≈ 4 × 10⁹, ≈ 3.3 × 10⁹ inside the 6 kpc cutoff) with a 25° bar;
-// halo ≈ 10⁻⁴ stars/pc³ locally; dust ≈ 1 mag/kpc locally (α₀ = 0.001 e^{8200/3200}).
+// halo ≈ 10⁻⁴ stars/pc³ locally; dust ≈ 0.7 mag/kpc locally (α₀ = 0.0007 e^{8200/3200}), the low end of the
+// observed 0.7–1.8: at 1 mag/kpc the plane came out 2.4× the poles against ~4–7× in integrated-starlight surveys.
 std::optional<Galaxy> PresetGalaxy(std::string_view name, std::span<Population const> populations)
 {
 	auto population = [&](std::string_view populationName) { return FindPopulation(populations, populationName).value_or(-1); };
@@ -50,26 +51,26 @@ std::optional<Galaxy> PresetGalaxy(std::string_view name, std::span<Population c
 	{
 		galaxy.disk = {.enabled = true, .density = 2.34, .scaleLength = 2600.0, .scaleHeight = 300.0, .cutoff = 18000.0,
 			.arms = {.count = 4, .pitchDeg = 12.0, .width = 400.0, .contrast = 1.5, .clumping = 1.0, .phaseDeg = 0.0, .r0 = 1000.0},
-			.population = population("old-disk"), .armPopulation = population("young-disk"), .armYoungFraction = 0.02, .armScaleHeight = 90.0, .youngFraction = 0.006};
+			.population = population("old-disk"), .armPopulation = population("young-disk"), .armYoungFraction = 0.02, .armScaleHeight = 90.0, .youngFraction = 0.004, .associationSize = 150.0, .associationClumping = 2.0};
 		galaxy.thickDisk = {.enabled = true, .density = 0.058, .scaleLength = 3600.0, .scaleHeight = 900.0, .cutoff = 22000.0,
 			.arms = {}, .population = population("old-disk")};
 		galaxy.bulge = {.enabled = true, .density = 3.2e9, .scale = 600.0, .axisY = 0.5, .axisZ = 0.4, .barAngleDeg = 25.0,
 			.cutoff = 6000.0, .population = population("bulge")};
 		galaxy.halo = {.enabled = true, .density = 0.24, .scale = 1000.0, .cutoff = 30000.0, .population = population("halo")};
-		galaxy.dust = {.enabled = true, .extinction = 0.013, .scaleLength = 3200.0, .scaleHeight = 100.0, .cutoff = 18000.0,
-			.laneOffset = 0.15, .contrast = 4.0, .filament = 2.0};
+		galaxy.dust = {.enabled = true, .extinction = 0.009, .scaleLength = 3200.0, .scaleHeight = 100.0, .cutoff = 18000.0,
+			.laneOffset = 0.15, .contrast = 4.0, .filament = 3.0};
 		return galaxy;
 	}
 	if (name == "small-spiral")
 	{
 		galaxy.disk = {.enabled = true, .density = 1.5, .scaleLength = 1500.0, .scaleHeight = 250.0, .cutoff = 10000.0,
 			.arms = {.count = 2, .pitchDeg = 18.0, .width = 300.0, .contrast = 1.5, .clumping = 1.0, .phaseDeg = 0.0, .r0 = 600.0},
-			.population = population("old-disk"), .armPopulation = population("young-disk"), .armYoungFraction = 0.03, .armScaleHeight = 80.0};
+			.population = population("old-disk"), .armPopulation = population("young-disk"), .armYoungFraction = 0.03, .armScaleHeight = 80.0, .associationSize = 150.0, .associationClumping = 2.0};
 		galaxy.bulge = {.enabled = true, .density = 3.2e8, .scale = 300.0, .axisY = 1.0, .axisZ = 1.0, .barAngleDeg = 0.0,
 			.cutoff = 3000.0, .population = population("bulge")};
 		galaxy.halo = {.enabled = true, .density = 0.05, .scale = 800.0, .cutoff = 15000.0, .population = population("halo")};
-		galaxy.dust = {.enabled = true, .extinction = 0.008, .scaleLength = 1800.0, .scaleHeight = 90.0, .cutoff = 10000.0,
-			.laneOffset = 0.15, .contrast = 4.0, .filament = 2.0};
+		galaxy.dust = {.enabled = true, .extinction = 0.0055, .scaleLength = 1800.0, .scaleHeight = 90.0, .cutoff = 10000.0,
+			.laneOffset = 0.15, .contrast = 4.0, .filament = 3.0};
 		return galaxy;
 	}
 	if (name == "elliptical")

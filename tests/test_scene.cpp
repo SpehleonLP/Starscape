@@ -149,3 +149,16 @@ TEST_CASE("An enabled component must be usable")
 	CHECK(ErrorOf(tail + "[galaxy.dust]\nextinction = 0.1\n").find("no cutoff") != std::string::npos);
 	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\n[galaxy.disk]\narm_young_fraction = 0.5\n").find("arm_population") != std::string::npos);
 }
+
+TEST_CASE("A dust bubble is read, and needs both semi-axes")
+{
+	std::string const head = std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.dust]\n";
+	Expected<Scene> const scene = ParseScene(head + "bubble = { center = [8200.0, 0.0, 20.0], radius = 300.0, height = 800.0 }\n", "test.toml");
+	REQUIRE(scene.has_value());
+	Dust const& dust = scene->galaxies[0].dust;
+	CHECK(dust.bubbleCenter == glm::dvec3(8200.0, 0.0, 20.0));
+	CHECK(dust.bubbleRadius == 300.0);
+	CHECK(dust.bubbleHeight == 800.0);
+	CHECK(ErrorOf(head + "bubble = { center = [8200.0, 0.0, 20.0], radius = 300.0 }\n").find("dust.bubble: needs a positive radius and height") != std::string::npos);
+	CHECK(ErrorOf(head + "bubble = { radius = 300.0, height = 800.0, size = 2.0 }\n").find("bubble.size") != std::string::npos);
+}

@@ -21,6 +21,8 @@ constexpr double kFbmSigma = 0.163;
 constexpr double kRidgedMean = 0.6307;
 constexpr double kRidgedSigma = 0.1339;
 constexpr int kDustOctaves = 6;
+constexpr int kAssociationOctaves = 3;
+constexpr uint64_t kAssociationNoiseSalt = 0xA550C1A7E5ull;
 
 // A log-normal field whose logarithm has standard deviation `sigma`, given z of unit variance. Holding
 // the mean near one lets structure move stars and dust around without changing how much there is,
@@ -38,21 +40,44 @@ double DustField(Dust const& dust, glm::dvec3 noiseSpace, uint64_t seed)
 	return LogNormal(dust.filament, (RidgedFbm(noiseSpace, kDustOctaves, seed ^ kDustNoiseSalt) - kRidgedMean) / kRidgedSigma);
 }
 
+// Young stars are born in OB associations tens to a couple of hundred parsecs across, so the bright
+// stars, which are mostly young, gather into groups like Orion's while the old field stays smooth.
+double AssociationField(Disk const& disk, glm::dvec3 noiseSpace, uint64_t seed)
+{
+	return LogNormal(disk.associationClumping, Fbm(noiseSpace, kAssociationOctaves, seed ^ kAssociationNoiseSalt) / kFbmSigma);
+}
+
+// A log-normal of bounded noise does not average one at large σ, so the mean is measured and divided
+// out: structure moves stars and dust around without changing how much there is.
+template<class Field>
+double SpatialMean(Field field)
+{
+	// An R3 low-discrepancy walk over a box many noise cells wide, so the samples are independent.
+	constexpr int kSamples = 1 << 18;
+	double sum = 0.0;
+	for (int i = 1; i <= kSamples; ++i)
+	{
+		sum += field(glm::fract(double(i) * glm::dvec3(0.8191725134, 0.6710436067, 0.5497004779)) * 4096.0);
+	}
+	return sum / kSamples;
+}
+
 double DustFieldMean(Dust const& dust, uint64_t seed)
 {
 	if (dust.filament == 0.0)
 	{
 		return 1.0;
 	}
-	// An R3 low-discrepancy walk over a box many noise cells wide, so the samples are independent.
-	constexpr int kSamples = 1 << 16;
-	double sum = 0.0;
-	for (int i = 1; i <= kSamples; ++i)
+	return SpatialMean([&](glm::dvec3 p) { return DustField(dust, p, seed); });
+}
+
+double AssociationMean(Disk const& disk, uint64_t seed)
+{
+	if (disk.associationSize <= 0.0 || disk.associationClumping == 0.0)
 	{
-		glm::dvec3 const u = glm::fract(double(i) * glm::dvec3(0.8191725134, 0.6710436067, 0.5497004779));
-		sum += DustField(dust, u * 4096.0, seed);
+		return 1.0;
 	}
-	return sum / kSamples;
+	return SpatialMean([&](glm::dvec3 p) { return AssociationField(disk, p, seed); });
 }
 
 double Radians(double degrees)
@@ -138,6 +163,8 @@ PreparedGalaxy PrepareGalaxy(Galaxy const& galaxy)
 	PreparedGalaxy prepared;
 	prepared.galaxy = galaxy;
 	prepared.galaxy.dust.filamentMean = DustFieldMean(galaxy.dust, galaxy.seed);
+	prepared.galaxy.disk.associationMean = AssociationMean(galaxy.disk, galaxy.seed);
+	prepared.galaxy.thickDisk.associationMean = AssociationMean(galaxy.thickDisk, galaxy.seed);
 	glm::dmat3 const toScene = RotationX(Radians(galaxy.rotationDeg.x)) * RotationY(Radians(galaxy.rotationDeg.y)) * RotationZ(Radians(galaxy.rotationDeg.z));
 	prepared.toLocal = glm::transpose(toScene);
 	prepared.position = galaxy.position;
@@ -184,7 +211,14 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 		// Young stars have not yet been heated out of the plane: sharing the old disk's thickness turns
 		// each nearby arm into a wall whose tangent draws a hard edge from horizon to zenith.
 		double const youngHeight = disk.armScaleHeight > 0.0 ? disk.armScaleHeight : disk.scaleHeight;
-		push(midplane * young * Sech2(p.z / (2.0 * youngHeight)), disk.armPopulation);
+		// Associations add young stars where they are rather than taking a share of the old ones, so the
+		// field multiplies the young density, not the share capped at one.
+		double associations = 1.0;
+		if (disk.associationSize > 0.0)
+		{
+			associations = AssociationField(disk, p / disk.associationSize, galaxy.seed) / disk.associationMean;
+		}
+		push(midplane * young * associations * Sech2(p.z / (2.0 * youngHeight)), disk.armPopulation);
 	};
 	addDisk(galaxy.disk);
 	addDisk(galaxy.thickDisk);
@@ -218,6 +252,15 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 		// Log-normal like the clumps: dust is filaments with clear holes between them, not a modulated sheet.
 		double const filaments = DustField(dust, p / wavelength, galaxy.seed) / dust.filamentMean;
 		out.extinction = dust.extinction * std::exp(-radius / dust.scaleLength) * Sech2(p.z / (2.0 * dust.scaleHeight)) * laneModulation * filaments;
+		if (dust.bubbleRadius > 0.0)
+		{
+			// Without the cavity, filaments within a few hundred parsecs of an observer in the plane
+			// blot the high latitudes, where the real sky's are faint cirrus.
+			glm::dvec3 const d = p - dust.bubbleCenter;
+			double const q = std::sqrt((d.x * d.x + d.y * d.y) / (dust.bubbleRadius * dust.bubbleRadius) + d.z * d.z / (dust.bubbleHeight * dust.bubbleHeight));
+			double const t = std::clamp((q - 0.7) / 0.3, 0.0, 1.0);
+			out.extinction *= t * t * (3.0 - 2.0 * t);
+		}
 	}
 }
 

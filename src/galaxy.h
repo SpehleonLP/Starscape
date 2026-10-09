@@ -34,6 +34,9 @@ struct Disk
 	double armYoungFraction = 0.0;      // share of armPopulation on an arm's crest, at the midplane
 	double armScaleHeight   = 0.0;      // the arm population's own scale height; 0: the disk's
 	double youngFraction    = 0.0;      // armPopulation share everywhere in the midplane, arms or not
+	double associationSize  = 0.0;      // wavelength of the field gathering young stars into OB associations; 0: none
+	double associationClumping = 0.0;   // its log standard deviation
+	double associationMean  = 1.0;      // derived by PrepareGalaxy, divided out like Dust::filamentMean
 };
 
 // Hernquist profile n_b a / (r' (r' + a)³) over a radius r' stretched along a bar.
@@ -68,6 +71,11 @@ struct Dust
 	double laneOffset  = 0.0;   // lane shift toward each arm's inner edge, in arm widths
 	double contrast    = 1.0;
 	double filament    = 0.0;   // log standard deviation of the field that breaks dust into filaments and holes
+	// A supernova-blown cavity such as the Sun's Local Bubble: an ellipsoid in the galaxy frame, empty
+	// within 70% of its semi-axes and ramping to full density at its edge. Radius 0: none.
+	glm::dvec3 bubbleCenter{0.0};
+	double bubbleRadius = 0.0;  // semi-axis in the plane, parsecs
+	double bubbleHeight = 0.0;  // semi-axis along the spin axis; bubbles open into chimneys toward the halo
 	double filamentMean = 1.0;  // derived by PrepareGalaxy: the field's spatial mean, divided out so α₀ stays the mean
 };
 

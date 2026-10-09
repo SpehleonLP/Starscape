@@ -222,6 +222,60 @@ TEST_CASE("Dust filaments move extinction around without changing its mean")
 	CHECK(lowest < 0.1);   // the structure is real: some sight lines nearly clear
 }
 
+TEST_CASE("Associations gather young stars without changing how many there are")
+{
+	// Mutation: dropping the division by associationMean moves the mean by 16% at σ 2.
+	Galaxy galaxy;
+	galaxy.disk = {.enabled = true, .density = 1.0, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 1e9, .arms = {}, .population = 1, .armPopulation = 0,
+		.youngFraction = 0.01, .associationSize = 150.0, .associationClumping = 2.0};
+	PreparedGalaxy const prepared = PrepareGalaxy(galaxy);
+	RandomStream rng(7, Purpose::Test, 0, 0, 0);
+	double young = 0.0;
+	double old = 0.0;
+	double densest = 0.0;
+	int split = 0;
+	int const count = 200000;
+	for (int i = 0; i < count; ++i)
+	{
+		glm::dvec3 const p(rng.NextDouble() * 1e6 - 5e5, rng.NextDouble() * 1e6 - 5e5, rng.NextDouble() * 1e6 - 5e5);
+		GalaxySample sample;
+		Evaluate(prepared, p, sample);
+		split += sample.count == 2 ? 1 : 0;
+		old += sample.parts[0].density;
+		young += sample.parts[1].density;
+		densest = std::max(densest, sample.parts[1].density);
+	}
+	REQUIRE(split == count);
+	CHECK(std::abs(young / count / 0.01 - 1.0) < 0.03);
+	CHECK(old / count == doctest::Approx(0.99));   // associations add young stars, they do not convert old ones
+	CHECK(densest > 0.1);                          // the structure is real: groups ten times the mean density
+}
+
+TEST_CASE("A dust bubble empties its core and leaves the outside alone")
+{
+	// Mutation: dropping the bubble leaves the core at full extinction.
+	Galaxy galaxy;
+	galaxy.dust = {.enabled = true, .extinction = 0.002, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 1e9, .laneOffset = 0.0, .contrast = 1.0, .filament = 0.0,
+		.bubbleCenter = {100.0, 0.0, 0.0}, .bubbleRadius = 300.0, .bubbleHeight = 800.0};
+	Galaxy open = galaxy;
+	open.dust.bubbleRadius = 0.0;
+	auto extinction = [](Galaxy const& g, glm::dvec3 p)
+	{
+		GalaxySample sample;
+		EvaluateLocal(g, p, sample);
+		return sample.extinction;
+	};
+	CHECK(extinction(galaxy, {100.0, 0.0, 0.0}) == 0.0);
+	CHECK(extinction(galaxy, {100.0, 0.0, 500.0}) == 0.0);   // 0.625 of the vertical semi-axis: inside the chimney
+	CHECK(extinction(galaxy, {100.0, 250.0, 0.0}) > 0.0);    // 0.83 of the radius: on the ramp
+	CHECK(extinction(galaxy, {100.0, 250.0, 0.0}) < 0.5 * extinction(open, {100.0, 250.0, 0.0}));
+	for (glm::dvec3 const outside : {glm::dvec3(100.0, 0.0, 801.0), glm::dvec3(401.0, 0.0, 0.0)})
+	{
+		CHECK(extinction(open, outside) > 0.0);
+		CHECK(extinction(galaxy, outside) == extinction(open, outside));
+	}
+}
+
 TEST_CASE("Galaxy presets resolve their populations")
 {
 	std::vector<Population> const populations = PresetPopulations();

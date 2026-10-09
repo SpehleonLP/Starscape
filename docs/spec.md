@@ -100,11 +100,7 @@ measured). C is log-normal so clumping opens gaps between star clouds rather
 than rippling the crest, and its mean stays within 2% of one up to σ 1.5, so
 structure moves stars around without changing the star counts.
 
-Every noise octave is shifted off the lattice by an irrational offset. Gradient
-noise is zero on its lattice and doubling keeps z = 0 on it, so without the shift
-the midplane, where most dust lives, would be the galaxy's least structured
-place, and ridged noise there would read 0.22σ high: 1.55× the calibrated dust
-at σ 2. The arm fraction a = exp(−d² / 2w²) also blends the thin disk's
+The arm fraction a = exp(−d² / 2w²) also blends the thin disk's
 population: at the midplane, weight y = min(1, (`young_fraction` + `arm_young_fraction` × a) × C) goes
 to its `arm_population` (`young-disk`), the rest to its `population`
 (`old-disk`). Young stars are a small share by number but, at ~26× the mean
@@ -115,13 +111,31 @@ Young stars have not been heated out of the plane; giving them the old disk's
 thickness turns each nearby arm into a wall whose tangent draws a hard edge from
 horizon to zenith (seen in the first full cook).
 
+Young stars are born in OB associations, so the young part is further multiplied
+by S = LN(`association_clumping`, fbm₃(x / `association_size`) / σ_fbm) / ⟨LN⟩,
+3-octave fbm with its mean measured and divided out like the dust's. S adds young
+stars where associations are rather than converting old ones, so it multiplies
+the young density, not the capped share y. Young stars dominate the bright end,
+so bright stars gather into groups like Orion's and Scorpius–Centaurus while the
+faint field stays smooth. σ is held to 2: at 3 the field's variance is ~e⁹, a
+handful of rare associations carry its mean, and one landing near the observer
+adds 30% to the bright counts.
+
+Every noise octave is shifted off the lattice by an irrational offset. Gradient
+noise is zero on its lattice and doubling keeps z = 0 on it, so without the shift
+the midplane, where most dust lives, would be the galaxy's least structured
+place, and ridged noise there would read 0.22σ high: 1.55× the calibrated dust
+at σ 2.
+
 Every component has an explicit `cutoff` radius in parsecs (presets set them).
 The bulge radius r′ is floored at 1 pc so an observer at the core stays finite.
 
 ### Dust
 
 Dust is a separate field giving visual extinction per parsec, α_V(x) in
-magnitudes/pc (the solar neighbourhood is about 0.001 mag/pc):
+magnitudes/pc (the solar neighbourhood is 0.0007–0.0018 mag/pc; the presets take
+0.0007, the low end: at 0.001 the band came out 2.4× the poles against ~4–7× in
+integrated-starlight surveys):
 
     α_V = α₀ · exp(−R/R_dust) · sech²(z / 2h_dust) · D(R, φ) · F(x)
     F = LN(filament, (ridged(x) − μ_r) / σ_r) / ⟨LN⟩
@@ -134,8 +148,17 @@ wavelength w/2 (μ_r = 0.6307, σ_r = 0.1339, measured). Its ridges are thin
 sheets and lines, so dust is filaments and a rift down the band, not round
 clouds: plain fbm put a 25° black blob 200 pc from the Sun. Ridged noise is
 bounded above, which pulls the log-normal's mean below one (0.65 at σ 2), so the
-galaxy's preparation measures ⟨LN⟩ over 2¹⁶ points and divides it out. α₀ stays
-the mean extinction at any `filament`.
+galaxy's preparation measures ⟨LN⟩ over 2¹⁸ points and divides it out. α₀ stays
+the mean extinction at any `filament`. The presets take `filament` = 3: higher
+puts the plane on the survey numbers but draws the filaments as black threads,
+and the real sky's are subtle.
+
+An optional `bubble = { center, radius, height }` (galaxy frame, parsecs) carves
+an ellipsoidal cavity: dust-free within 70% of its semi-axes, ramping to full
+density at its edge. The Sun sits in such a cavity, the Local Bubble, a few
+hundred parsecs across and open toward the poles. Without it, filaments within a
+few hundred parsecs of an observer in the plane blot the high latitudes, where
+the real sky's are faint cirrus. The Earth scene sets one of 300 × 800 pc.
 
 Extinction is per channel. The optical depth of channel c along a path is
 
@@ -163,8 +186,9 @@ evolved branch: the 8 % of mass above the turnoff, 35 % of it in the red clump
 dN/d log L ∝ L^−0.75, cooling from 5100 to 3900 K. The tables are data, not
 computed at runtime. Targets they were tuned against, on the example scene: the
 old disk's light is ~5200 K (the real Galaxy's integrated light is ~5000 K), and
-star counts brighter than V = 1, 2, 3, 4, 5 come out 22, 93, 279, 774, 2276
-against the real sky's ~22, 90, 300, 900, 2800. The first tables spread giants
+star counts brighter than V = 1, 2, 3, 4, 5 come out 33, 105, 280, 876, 2619
+against the real sky's ~22, 90, 300, 900, 2800, with `young_fraction` 0.004
+setting the bright end (it moves with the dust and the associations). The first tables spread giants
 log-uniformly over L_V 10–1000 from a 1 M☉ turnoff; giants then carried 77 % of
 the old disk's light at ~4000 K, which made the sky brown and tripled the bright
 star counts.
@@ -393,7 +417,7 @@ seed     = 1
   [galaxy.dust]
   scale_height = 100.0
   lane_offset  = 0.15
-  filament     = 2.0
+  filament     = 3.0
 
 [[galaxy]]
 preset   = "small-spiral"

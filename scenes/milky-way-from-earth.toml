@@ -15,6 +15,11 @@ zero_meridian = [0.0549, -0.4940, -0.8677]
 preset = "milky-way"
 seed   = 1
 
+  # The Local Bubble: the Sun sits in a dust-poor cavity a few hundred parsecs across that opens
+  # toward the galactic poles, which is why the high latitudes are clear.
+  [galaxy.dust]
+  bubble = { center = [8200.0, 0.0, 20.0], radius = 300.0, height = 800.0 }
+
 [[galaxy]]
 preset   = "small-spiral"
 position = [780000.0, 120000.0, -40000.0]
