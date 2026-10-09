@@ -41,6 +41,11 @@ double Corner(int64_t ix, int64_t iy, int64_t iz, double fx, double fy, double f
 	return g[0] * fx + g[1] * fy + g[2] * fz;
 }
 
+// Gradient noise is zero on its lattice, so its variance sags on lattice planes, and doubling keeps
+// z = 0 on one at every octave: a galaxy's midplane, where most of its dust is, would be the least
+// structured place in it. An irrational shift per octave moves every octave off the lattice.
+constexpr glm::dvec3 kOctaveShift(0.5497004779, 0.6710436067, 0.8191725134);
+
 }
 
 double GradientNoise(glm::dvec3 p, uint64_t seed)
@@ -73,19 +78,37 @@ double GradientNoise(glm::dvec3 p, uint64_t seed)
 		w);
 }
 
-double Fbm(glm::dvec3 p, int octaves, uint64_t seed)
+namespace
+{
+
+template<class Shape>
+double Octaves(glm::dvec3 p, int octaves, uint64_t seed, Shape shape)
 {
 	double sum = 0.0;
 	double amplitude = 1.0;
 	double norm = 0.0;
+	p += kOctaveShift;
 	for (int octave = 0; octave < octaves; ++octave)
 	{
-		sum += amplitude * GradientNoise(p, seed + uint64_t(octave) * 0x632BE59BD9B4E019ull);
+		sum += amplitude * shape(GradientNoise(p, seed + uint64_t(octave) * 0x632BE59BD9B4E019ull));
 		norm += amplitude;
 		amplitude *= 0.5;
-		p *= 2.0;
+		p = p * 2.0 + kOctaveShift;
 	}
 	return sum / norm;
+}
+
+}
+
+double Fbm(glm::dvec3 p, int octaves, uint64_t seed)
+{
+	return Octaves(p, octaves, seed, [](double noise) { return noise; });
+}
+
+// Squared, so the ridges where the noise crosses zero are thin and the dust they carry is filaments.
+double RidgedFbm(glm::dvec3 p, int octaves, uint64_t seed)
+{
+	return Octaves(p, octaves, seed, [](double noise) { return (1.0 - std::abs(noise)) * (1.0 - std::abs(noise)); });
 }
 
 }

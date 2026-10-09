@@ -32,7 +32,7 @@ TEST_CASE("Preset populations are normalised and keep their derived mean luminos
 		double const sum = std::accumulate(presets[i].fraction.begin(), presets[i].fraction.end(), 0.0);
 		CHECK(sum == doctest::Approx(1.0).epsilon(1e-5));
 		PopulationTable const table = Tabulate(presets[i]);
-		CHECK(Luminance(table.lightBelow[kBins]) == doctest::Approx(expectedMean[i]).epsilon(0.01));
+		CHECK(Luminance(table.lightBelow[kBins]) == doctest::Approx(expectedMean[i]).epsilon(0.01).scale(0.0));
 		CHECK(Luminance(table.lightBelow[0]) == 0.0);
 	}
 }

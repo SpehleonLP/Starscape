@@ -153,10 +153,10 @@ TEST_CASE("A uniform dust ball dims each channel by exp(-k tau)")
 	glm::dvec3 const dimmed = FluxInCone(dusty, params, halfAngle);
 
 	double const tau = alpha * (radius - scene.observer.sMin) / 1.0857;
-	CHECK(dimmed.x / clear.x == doctest::Approx(std::exp(-0.75 * tau)).epsilon(0.005));
-	CHECK(dimmed.y / clear.y == doctest::Approx(std::exp(-1.00 * tau)).epsilon(0.005));
-	CHECK(dimmed.z / clear.z == doctest::Approx(std::exp(-1.32 * tau)).epsilon(0.005));
-	CHECK(TransmittanceTo(dusty, params, {0.0, 1.0, 0.0}, 1.0e7).y == doctest::Approx(std::exp(-tau)).epsilon(0.005));
+	CHECK(dimmed.x / clear.x == doctest::Approx(std::exp(-0.75 * tau)).epsilon(0.005).scale(0.0));
+	CHECK(dimmed.y / clear.y == doctest::Approx(std::exp(-1.00 * tau)).epsilon(0.005).scale(0.0));
+	CHECK(dimmed.z / clear.z == doctest::Approx(std::exp(-1.32 * tau)).epsilon(0.005).scale(0.0));
+	CHECK(TransmittanceTo(dusty, params, {0.0, 1.0, 0.0}, 1.0e7).y == doctest::Approx(std::exp(-tau)).epsilon(0.005).scale(0.0));
 }
 
 TEST_CASE("Points and diffuse split one ray's light without loss")

@@ -50,3 +50,24 @@ TEST_CASE("Noise keeps its variance at galactic coordinates")
 	double const mean = sum / n;
 	CHECK(sumSquares / n - mean * mean > 0.01);
 }
+
+// A galaxy's midplane is z = 0; on an unshifted lattice it is a lattice plane at every octave, where
+// gradient noise sags toward zero. Unshifted, fbm's variance there drops to 0.021 and ridged fbm's mean
+// rises to 0.659, 0.22σ: at the presets' σ 2 that is 1.55 times the calibrated dust along the plane.
+TEST_CASE("Noise keeps its statistics on the coordinate planes")
+{
+	RandomStream rng(6, Purpose::Test, 0, 0, 0);
+	constexpr int n = 100000;
+	double sumSquares = 0.0;
+	double ridged = 0.0;
+	for (int i = 0; i < n; ++i)
+	{
+		glm::dvec3 const p(rng.NextDouble() * 1000.0 - 500.0, rng.NextDouble() * 1000.0 - 500.0, 0.0);
+		double const v = Fbm(p, 6, 11);
+		sumSquares += v * v;
+		ridged += RidgedFbm(p, 6, 11);
+	}
+	// Over the volume: variance 0.0252, ridged mean 0.6305.
+	CHECK(sumSquares / n > 0.023);
+	CHECK(std::abs(ridged / n - 0.6305) < 0.01);
+}

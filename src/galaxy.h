@@ -15,7 +15,7 @@ struct Arms
 	double pitchDeg  = 12.0;
 	double width     = 400.0;   // Gaussian σ across the arm, parsecs of arc length
 	double contrast  = 1.0;     // density multiplier on the arm's crest
-	double clumping  = 0.0;     // log-amplitude of the fbm that breaks arms into clumps and gaps
+	double clumping  = 0.0;     // log standard deviation of the mean-one field that breaks arms into clumps and gaps
 	double phaseDeg  = 0.0;
 	double r0        = 1000.0;
 };
@@ -67,7 +67,8 @@ struct Dust
 	double cutoff      = 0.0;
 	double laneOffset  = 0.0;   // lane shift toward each arm's inner edge, in arm widths
 	double contrast    = 1.0;
-	double filament    = 0.0;   // log-amplitude of the fbm that breaks dust into clouds and holes
+	double filament    = 0.0;   // log standard deviation of the field that breaks dust into filaments and holes
+	double filamentMean = 1.0;  // derived by PrepareGalaxy: the field's spatial mean, divided out so α₀ stays the mean
 };
 
 struct Galaxy

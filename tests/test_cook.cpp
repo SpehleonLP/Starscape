@@ -84,8 +84,8 @@ TEST_CASE("Poisson draws have the right mean and variance")
 			sumSquares += k * k;
 		}
 		double const mean = sum / n;
-		CHECK(mean == doctest::Approx(lambda).epsilon(0.02));
-		CHECK(sumSquares / n - mean * mean == doctest::Approx(lambda).epsilon(0.03));
+		CHECK(mean == doctest::Approx(lambda).epsilon(0.02).scale(0.0));
+		CHECK(sumSquares / n - mean * mean == doctest::Approx(lambda).epsilon(0.03).scale(0.0));
 	}
 	RandomStream rng(9, Purpose::Test, 0, 0, 1);
 	CHECK(SamplePoisson(0.0, rng) == 0);
@@ -115,7 +115,7 @@ TEST_CASE("Texel directions stay in their texel and are uniform in solid angle")
 		for (uint32_t x = 0; x < 2; ++x)
 		{
 			double const share = kre_starscape::TexelSolidAngle(fine, x, y) / whole;
-			CHECK(hits[y][x] / n == doctest::Approx(share).epsilon(0.02));
+			CHECK(hits[y][x] / n == doctest::Approx(share).epsilon(0.02).scale(0.0));
 		}
 	}
 }

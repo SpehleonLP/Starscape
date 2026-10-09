@@ -89,13 +89,22 @@ radius R is θ_k(R) = φ₀ + 2πk/m + ln(R / R₀) / tan ψ. Let d be the dista
 (R, φ) to the nearest arm, measured along the circle of radius R (arc length,
 parsecs). Then
 
-    C = exp(clumping · fbm(x))
+    C = LN(clumping, fbm(x) / σ_fbm)
     A = 1 + (contrast − 1) · exp(−d² / 2w²) · C
 
 clamped to ≥ 0, where w is the arm width and fbm is 4-octave gradient noise in
-the galaxy frame (base wavelength = w), seeded by the galaxy's seed. C is
-log-normal so clumping opens gaps between star clouds rather than rippling the
-crest. The arm fraction a = exp(−d² / 2w²) also blends the thin disk's
+the galaxy frame (base wavelength = w), seeded by the galaxy's seed.
+LN(σ, z) = exp(σz − σ²/2) is a log-normal field whose logarithm has standard
+deviation σ (`clumping`, `filament`), given z of unit variance (σ_fbm = 0.163,
+measured). C is log-normal so clumping opens gaps between star clouds rather
+than rippling the crest, and its mean stays within 2% of one up to σ 1.5, so
+structure moves stars around without changing the star counts.
+
+Every noise octave is shifted off the lattice by an irrational offset. Gradient
+noise is zero on its lattice and doubling keeps z = 0 on it, so without the shift
+the midplane, where most dust lives, would be the galaxy's least structured
+place, and ridged noise there would read 0.22σ high: 1.55× the calibrated dust
+at σ 2. The arm fraction a = exp(−d² / 2w²) also blends the thin disk's
 population: at the midplane, weight y = min(1, (`young_fraction` + `arm_young_fraction` × a) × C) goes
 to its `arm_population` (`young-disk`), the rest to its `population`
 (`old-disk`). Young stars are a small share by number but, at ~26× the mean
@@ -114,13 +123,19 @@ The bulge radius r′ is floored at 1 pc so an observer at the core stays finite
 Dust is a separate field giving visual extinction per parsec, α_V(x) in
 magnitudes/pc (the solar neighbourhood is about 0.001 mag/pc):
 
-    α_V = α₀ · exp(−R/R_dust) · sech²(z / 2h_dust) · D(R, φ) · exp(filament · fbm_dust(x))
+    α_V = α₀ · exp(−R/R_dust) · sech²(z / 2h_dust) · D(R, φ) · F(x)
+    F = LN(filament, (ridged(x) − μ_r) / σ_r) / ⟨LN⟩
 
-The log-normal factor makes dust clouds with clear holes between them, not a
+The log-normal factor makes dust filaments with clear holes between them, not a
 modulated sheet. D is the arm modulation computed with arm phase offset inward by
 `lane_offset · w` (lanes sit on the inner, concave edge of each arm) and its own
-contrast. fbm_dust has 6 octaves with base wavelength w/2, so lanes break into
-filaments.
+contrast. ridged is 6-octave ridged noise, Σ (1 − |noise|)², with base
+wavelength w/2 (μ_r = 0.6307, σ_r = 0.1339, measured). Its ridges are thin
+sheets and lines, so dust is filaments and a rift down the band, not round
+clouds: plain fbm put a 25° black blob 200 pc from the Sun. Ridged noise is
+bounded above, which pulls the log-normal's mean below one (0.65 at σ 2), so the
+galaxy's preparation measures ⟨LN⟩ over 2¹⁶ points and divides it out. α₀ stays
+the mean extinction at any `filament`.
 
 Extinction is per channel. The optical depth of channel c along a path is
 
@@ -373,12 +388,12 @@ seed     = 1
   [galaxy.disk]
   scale_length = 2600.0
   scale_height = 300.0
-  arms = { count = 4, pitch_deg = 12.0, width = 400.0, contrast = 1.5, clumping = 1.2 }
+  arms = { count = 4, pitch_deg = 12.0, width = 400.0, contrast = 1.5, clumping = 1.0 }
 
   [galaxy.dust]
   scale_height = 100.0
   lane_offset  = 0.15
-  filament     = 1.2
+  filament     = 2.0
 
 [[galaxy]]
 preset   = "small-spiral"
@@ -455,7 +470,7 @@ Starscape/
     galaxy.h/.cpp                # components, arm modulation, dust field, bounding spheres
     population.h/.cpp            # bins, chromaticity
     common.h                     # Error, Expected, TRY macros
-    noise.h/.cpp                 # gradient noise, fbm
+    noise.h/.cpp                 # gradient noise, fbm, ridged fbm
     rng.h                        # Philox 4x32-10
     march.h/.cpp                 # intervals, per-ray march, flux histogram, star re-march
     parallel.h                   # deterministic ParallelFor

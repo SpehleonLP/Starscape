@@ -49,7 +49,7 @@ std::optional<Galaxy> PresetGalaxy(std::string_view name, std::span<Population c
 	if (name == "milky-way")
 	{
 		galaxy.disk = {.enabled = true, .density = 2.34, .scaleLength = 2600.0, .scaleHeight = 300.0, .cutoff = 18000.0,
-			.arms = {.count = 4, .pitchDeg = 12.0, .width = 400.0, .contrast = 1.5, .clumping = 1.2, .phaseDeg = 0.0, .r0 = 1000.0},
+			.arms = {.count = 4, .pitchDeg = 12.0, .width = 400.0, .contrast = 1.5, .clumping = 1.0, .phaseDeg = 0.0, .r0 = 1000.0},
 			.population = population("old-disk"), .armPopulation = population("young-disk"), .armYoungFraction = 0.02, .armScaleHeight = 90.0, .youngFraction = 0.006};
 		galaxy.thickDisk = {.enabled = true, .density = 0.058, .scaleLength = 3600.0, .scaleHeight = 900.0, .cutoff = 22000.0,
 			.arms = {}, .population = population("old-disk")};
@@ -57,19 +57,19 @@ std::optional<Galaxy> PresetGalaxy(std::string_view name, std::span<Population c
 			.cutoff = 6000.0, .population = population("bulge")};
 		galaxy.halo = {.enabled = true, .density = 0.24, .scale = 1000.0, .cutoff = 30000.0, .population = population("halo")};
 		galaxy.dust = {.enabled = true, .extinction = 0.013, .scaleLength = 3200.0, .scaleHeight = 100.0, .cutoff = 18000.0,
-			.laneOffset = 0.15, .contrast = 4.0, .filament = 1.2};
+			.laneOffset = 0.15, .contrast = 4.0, .filament = 2.0};
 		return galaxy;
 	}
 	if (name == "small-spiral")
 	{
 		galaxy.disk = {.enabled = true, .density = 1.5, .scaleLength = 1500.0, .scaleHeight = 250.0, .cutoff = 10000.0,
-			.arms = {.count = 2, .pitchDeg = 18.0, .width = 300.0, .contrast = 1.5, .clumping = 1.2, .phaseDeg = 0.0, .r0 = 600.0},
+			.arms = {.count = 2, .pitchDeg = 18.0, .width = 300.0, .contrast = 1.5, .clumping = 1.0, .phaseDeg = 0.0, .r0 = 600.0},
 			.population = population("old-disk"), .armPopulation = population("young-disk"), .armYoungFraction = 0.03, .armScaleHeight = 80.0};
 		galaxy.bulge = {.enabled = true, .density = 3.2e8, .scale = 300.0, .axisY = 1.0, .axisZ = 1.0, .barAngleDeg = 0.0,
 			.cutoff = 3000.0, .population = population("bulge")};
 		galaxy.halo = {.enabled = true, .density = 0.05, .scale = 800.0, .cutoff = 15000.0, .population = population("halo")};
 		galaxy.dust = {.enabled = true, .extinction = 0.008, .scaleLength = 1800.0, .scaleHeight = 90.0, .cutoff = 10000.0,
-			.laneOffset = 0.15, .contrast = 4.0, .filament = 1.2};
+			.laneOffset = 0.15, .contrast = 4.0, .filament = 2.0};
 		return galaxy;
 	}
 	if (name == "elliptical")

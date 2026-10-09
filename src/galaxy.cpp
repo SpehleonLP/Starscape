@@ -2,6 +2,7 @@
 #include "noise.h"
 #include <algorithm>
 #include <cmath>
+#include <glm/common.hpp>
 #include <glm/geometric.hpp>
 #include <glm/matrix.hpp>
 
@@ -14,6 +15,45 @@ constexpr double kPi = 3.14159265358979323846;
 
 // Salts so the dust filaments do not trace the same noise as the arm clumps.
 constexpr uint64_t kDustNoiseSalt = 0xD057D057D057D057ull;
+
+// Moments measured over 4·10⁵ random points. Fbm: σ 0.167 at 4 octaves, 0.159 at 6. Ridged fbm at 6 octaves.
+constexpr double kFbmSigma = 0.163;
+constexpr double kRidgedMean = 0.6307;
+constexpr double kRidgedSigma = 0.1339;
+constexpr int kDustOctaves = 6;
+
+// A log-normal field whose logarithm has standard deviation `sigma`, given z of unit variance. Holding
+// the mean near one lets structure move stars and dust around without changing how much there is,
+// so star counts and the dust's magnitudes-per-kiloparsec calibration survive any setting. For fbm the
+// mean stays within 2% of one up to σ 1.5.
+double LogNormal(double sigma, double z)
+{
+	return std::exp(sigma * z - 0.5 * sigma * sigma);
+}
+
+// Dust is filamentary, so its field rides ridged noise; that noise is bounded above, which pulls the
+// log-normal's mean below one (0.65 at σ 2). Measured here rather than tabulated, so any σ stays calibrated.
+double DustField(Dust const& dust, glm::dvec3 noiseSpace, uint64_t seed)
+{
+	return LogNormal(dust.filament, (RidgedFbm(noiseSpace, kDustOctaves, seed ^ kDustNoiseSalt) - kRidgedMean) / kRidgedSigma);
+}
+
+double DustFieldMean(Dust const& dust, uint64_t seed)
+{
+	if (dust.filament == 0.0)
+	{
+		return 1.0;
+	}
+	// An R3 low-discrepancy walk over a box many noise cells wide, so the samples are independent.
+	constexpr int kSamples = 1 << 16;
+	double sum = 0.0;
+	for (int i = 1; i <= kSamples; ++i)
+	{
+		glm::dvec3 const u = glm::fract(double(i) * glm::dvec3(0.8191725134, 0.6710436067, 0.5497004779));
+		sum += DustField(dust, u * 4096.0, seed);
+	}
+	return sum / kSamples;
+}
 
 double Radians(double degrees)
 {
@@ -97,6 +137,7 @@ PreparedGalaxy PrepareGalaxy(Galaxy const& galaxy)
 {
 	PreparedGalaxy prepared;
 	prepared.galaxy = galaxy;
+	prepared.galaxy.dust.filamentMean = DustFieldMean(galaxy.dust, galaxy.seed);
 	glm::dmat3 const toScene = RotationX(Radians(galaxy.rotationDeg.x)) * RotationY(Radians(galaxy.rotationDeg.y)) * RotationZ(Radians(galaxy.rotationDeg.z));
 	prepared.toLocal = glm::transpose(toScene);
 	prepared.position = galaxy.position;
@@ -132,7 +173,7 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 		if (disk.arms.count > 0)
 		{
 			// Log-normal, so clumping opens real gaps between star clouds instead of a ripple on the crest.
-			clumps = std::exp(disk.arms.clumping * Fbm(p / disk.arms.width, 4, galaxy.seed));
+			clumps = LogNormal(disk.arms.clumping, Fbm(p / disk.arms.width, 4, galaxy.seed) / kFbmSigma);
 			modulation = std::max(0.0, 1.0 + (disk.arms.contrast - 1.0) * crest * clumps);
 		}
 		double const midplane = disk.density * std::exp(-radius / disk.scaleLength) * modulation;
@@ -174,8 +215,8 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 		double const lane = ArmProximity(arms, radius, azimuth, dust.laneOffset * arms.width);
 		double const laneModulation = 1.0 + (dust.contrast - 1.0) * lane;
 		double const wavelength = 0.5 * (arms.count > 0 ? arms.width : dust.scaleHeight);
-		// Log-normal like the clumps: dust is clouds with clear holes between them, not a modulated sheet.
-		double const filaments = std::exp(dust.filament * Fbm(p / wavelength, 6, galaxy.seed ^ kDustNoiseSalt));
+		// Log-normal like the clumps: dust is filaments with clear holes between them, not a modulated sheet.
+		double const filaments = DustField(dust, p / wavelength, galaxy.seed) / dust.filamentMean;
 		out.extinction = dust.extinction * std::exp(-radius / dust.scaleLength) * Sech2(p.z / (2.0 * dust.scaleHeight)) * laneModulation * filaments;
 	}
 }

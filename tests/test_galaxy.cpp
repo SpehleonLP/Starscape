@@ -1,5 +1,6 @@
 #include "galaxy.h"
 #include "presets.h"
+#include "rng.h"
 #include <doctest.h>
 #include <cmath>
 
@@ -194,6 +195,31 @@ TEST_CASE("Dust is a uniform field when its scales are huge")
 	EvaluateLocal(galaxy, {300.0, -200.0, 100.0}, sample);
 	CHECK(sample.extinction == doctest::Approx(0.002));
 	CHECK(BoundRadius(galaxy) == 1000.0);
+}
+
+TEST_CASE("Dust filaments move extinction around without changing its mean")
+{
+	// Mutation: dropping the division by filamentMean leaves the mean near 0.65 α₀ at σ 2.
+	Galaxy galaxy;
+	galaxy.dust = {.enabled = true, .extinction = 0.002, .scaleLength = 1e12, .scaleHeight = 1e4, .cutoff = 1e9, .laneOffset = 0.0, .contrast = 1.0, .filament = 2.0};
+	PreparedGalaxy const prepared = PrepareGalaxy(galaxy);
+	RandomStream rng(5, Purpose::Test, 0, 0, 0);
+	double sum = 0.0;
+	double lowest = 1.0;
+	int const count = 100000;
+	for (int i = 0; i < count; ++i)
+	{
+		// A slab eight noise cells thick: lattice noise is not stationary within a cell, so any one
+		// plane reads a few percent off the volume mean the normalisation holds.
+		glm::dvec3 const p(rng.NextDouble() * 1e7 - 5e6, rng.NextDouble() * 1e7 - 5e6, rng.NextDouble() * 4e4 - 2e4);
+		GalaxySample sample;
+		Evaluate(prepared, p, sample);
+		double const field = sample.extinction / (0.002 * Sech2(p.z / 2e4));
+		sum += field;
+		lowest = std::min(lowest, field);
+	}
+	CHECK(std::abs(sum / count - 1.0) < 0.03);
+	CHECK(lowest < 0.1);   // the structure is real: some sight lines nearly clear
 }
 
 TEST_CASE("Galaxy presets resolve their populations")

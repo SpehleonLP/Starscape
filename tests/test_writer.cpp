@@ -121,7 +121,7 @@ TEST_CASE("A dark sky keeps its precision")
 	for (uint32_t texel = 0; texel < 6 * 16; ++texel)
 	{
 		glm::dvec3 const decoded = Decoded(view, 0, texel / 16, texel % 4, (texel / 4) % 4);
-		CHECK(decoded.x == doctest::Approx(cooked.diffuse[texel].x).epsilon(1.0 / 256.0));
+		CHECK(decoded.x == doctest::Approx(cooked.diffuse[texel].x).epsilon(1.0 / 256.0).scale(0.0));
 	}
 }
 
