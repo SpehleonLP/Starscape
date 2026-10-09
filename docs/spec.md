@@ -183,7 +183,10 @@ traces `spp` stratified, jittered directions within the texel (spp = 16 at
    intervals. Gaps between intervals are empty: no emission, no dust.
 2. Within each interval, step from s_start = max(s_min, interval start) with
    step ds = clamp(α · s, ds_min, ds_max) (α = 0.02, ds_min = 0.01 pc,
-   ds_max = 5 pc at `final`; α = 0.1, ds_max = 50 pc at `quick`). Density n,
+   ds_max = 25 pc at `final`; α = 0.1, ds_max = 50 pc at `quick`; ds_max sits
+   at a quarter of the finest preset structure, ~100 pc — measured on the Milky
+   Way preset at face 64, 5 → 25 pc changed no texel by more than 0.6 %, within
+   RGB9E5's 9-bit step, and cut the march 3.5×). Density n,
    chroma and the extinction rate are evaluated once, at the step's midpoint,
    and held constant across the step [a, b]; distance is integrated exactly
    inside it.

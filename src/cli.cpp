@@ -25,7 +25,7 @@ namespace
 
 constexpr char const* kUsage =
 	"usage:\n"
-	"  starscape cook    <scene.toml> -o <out.kre_starscape> [--preview <out.hdr>] [--threads N] [--quick]\n"
+	"  starscape cook    <scene.toml> -o <out.kre_starscape> [--preview <out.hdr>] [--threads N] [--quick | --draft] [--width N]\n"
 	"  starscape preview <in.kre_starscape> -o <out.hdr> [--width N] [--exposure EV] [--threads N]\n"
 	"  starscape inspect <in.kre_starscape>\n";
 
@@ -58,6 +58,7 @@ struct Arguments
 	std::optional<std::string_view> preview;
 	unsigned threads = std::max(1u, std::thread::hardware_concurrency());
 	bool quick = false;
+	bool draft = false;
 	std::optional<uint32_t> width;
 	double exposure = 0.0;
 };
@@ -86,6 +87,10 @@ std::optional<std::string> ParseArguments(int argc, char** argv, Arguments& out)
 		if (arg == "--quick")
 		{
 			out.quick = true;
+		}
+		else if (arg == "--draft")
+		{
+			out.draft = true;
 		}
 		else if (arg == "-o" || arg == "--preview" || arg == "--threads" || arg == "--width" || arg == "--exposure")
 		{
@@ -156,17 +161,28 @@ int Cook(Arguments const& args)
 	{
 		return Usage("cook needs one scene file and -o");
 	}
-	Expected<Scene> const scene = LoadScene(std::string(args.positional[0]));
+	Expected<Scene> scene = LoadScene(std::string(args.positional[0]));
 	if (!scene)
 	{
 		return Report(scene.error());
+	}
+	// A draft trades resolution for turnaround so a scene's look can be iterated in seconds:
+	// the march's cost scales with texels x rays x steps, and quick quality cuts the last two.
+	if (args.draft)
+	{
+		scene->output.faceSize = std::min(scene->output.faceSize, 64u);
+		scene->output.previewWidth = std::min(scene->output.previewWidth, 1024u);
+	}
+	if (args.width)
+	{
+		scene->output.previewWidth = *args.width;
 	}
 	Log(std::format("cooking {} on {} threads", args.positional[0], args.threads));
 	int lastPercent = -1;
 	std::string lastPhase;
 	CookOptions options;
 	options.threads = args.threads;
-	if (args.quick)
+	if (args.quick || args.draft)
 	{
 		options.quality = Quality::Quick;
 	}

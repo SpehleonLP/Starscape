@@ -21,12 +21,13 @@ C++23 (GCC 13+). Dependencies are vendored in `third_party/` (see `third_party/V
 ```
 starscape cook scenes/milky-way-from-earth.toml -o sky.kre_starscape --preview sky.hdr
 starscape cook scene.toml -o quick.kre_starscape --quick     # 1 ray per texel, coarse steps
+starscape cook scene.toml -o draft.kre_starscape --draft --preview draft.hdr   # seconds: quick, face <= 64, preview <= 1024 wide
 starscape preview sky.kre_starscape -o bright.hdr --exposure 4
 starscape inspect sky.kre_starscape
 ```
 
 Options: `--threads N` (cook, preview; output is byte-identical for any thread count),
-`--quick` (cook), `--width N` and `--exposure EV` (preview). Exit codes: 0 success,
+`--quick` and `--draft` (cook), `--width N` (cook and preview: preview width) and `--exposure EV` (preview). Exit codes: 0 success,
 1 invalid input or usage, 2 I/O failure.
 
 ## Scene format

@@ -97,7 +97,7 @@ MarchParams ParamsFor(Quality quality)
 	{
 		return {.samplesPerAxis = 1, .alpha = 0.1, .dsMin = 0.01, .dsMax = 50.0};
 	}
-	return {.samplesPerAxis = 4, .alpha = 0.02, .dsMin = 0.01, .dsMax = 5.0};
+	return {.samplesPerAxis = 4, .alpha = 0.02, .dsMin = 0.01, .dsMax = 25.0};
 }
 
 PreparedScene PrepareScene(Scene const& scene)
