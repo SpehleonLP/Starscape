@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Repository: `/mnt/Passport/Kreatures-Engine/Tooling/Starscape` (its own git repo, branch `main`). All paths below are relative to it unless absolute.
+- Repository: `/mnt/Passport/Worktrees/starscape` (a worktree of the Starscape repo on branch `starscape-v1`; the main checkout at `/mnt/Passport/Kreatures-Engine/Tooling/Starscape` stays on `main` and is not touched until Task 11). All paths below are relative to it unless absolute.
 - No dependency on `Spehleon/lib` or anything private. Third-party code is vendored under `third_party/` with versions in `third_party/VERSIONS`.
 - C++23, `-Wall -Wextra -Wpedantic` clean. Tabs, Allman braces, **every** control-flow body braced, even one statement.
 - Containers, strings, `std::function` and structs larger than a couple of registers are passed `const&` (read) or `&&` (consume), never by value. `glm` vectors, spans and enums go by value.
@@ -21,10 +21,10 @@
 - Determinism: every random draw comes from `RandomStream` keyed on (seed, purpose, a, b, c); results are written to per-index slots and reduced in index order. Output is byte-identical on any thread count.
 - Units: parsecs; luminosity in L_V☉; flux in magnitude-0 units; `kFluxAt10pc = 0.01169499` (= 10^(−0.4·4.83)).
 - Build (outside the engine's jobserver wrapper, which covers engine trees only — keep it small and low-priority):
-  - configure: `cmake -S /mnt/Passport/Kreatures-Engine/Tooling/Starscape -B /mnt/Passport/Kreatures-Engine/Tooling/Starscape/Build -G Ninja`
-  - build: `nice -n 19 ionice -c 3 cmake --build /mnt/Passport/Kreatures-Engine/Tooling/Starscape/Build -j 4`
-  - one test: `/mnt/Passport/Kreatures-Engine/Tooling/Starscape/Build/starscape-tests --test-case='<name>'`
-  - all: `ctest --test-dir /mnt/Passport/Kreatures-Engine/Tooling/Starscape/Build --output-on-failure`
+  - configure: `cmake -S /mnt/Passport/Worktrees/starscape -B /mnt/Passport/Worktrees/starscape/Build -G Ninja`
+  - build: `nice -n 19 ionice -c 3 cmake --build /mnt/Passport/Worktrees/starscape/Build -j 4`
+  - one test: `/mnt/Passport/Worktrees/starscape/Build/starscape-tests --test-case='<name>'`
+  - all: `ctest --test-dir /mnt/Passport/Worktrees/starscape/Build --output-on-failure`
 - Every test that names a mutation must be shown red under that mutation once, then the mutation reverted (`touch` the file afterwards so Ninja rebuilds it). Record "mutation verified: <what>" in the commit message.
 - Never weaken a failing physics test to make it pass. If a model-level assertion (inside-disk ratios, energy) fails, stop and report the numbers.
 
@@ -482,7 +482,7 @@ double Fbm(glm::dvec3 p, int octaves, uint64_t seed)
 
 - [ ] **Step 8: Build and run the tests**
 
-Run build, then `ctest --test-dir /mnt/Passport/Kreatures-Engine/Tooling/Starscape/Build --output-on-failure`.
+Run build, then `ctest --test-dir /mnt/Passport/Worktrees/starscape/Build --output-on-failure`.
 Expected: all 6 test cases pass.
 
 - [ ] **Step 9: Run the reddening mutation**
@@ -492,7 +492,7 @@ Change `kMultiplier1` to `0xCD9E8D58u`; rebuild; the Philox test must fail. Reve
 - [ ] **Step 10: Commit**
 
 ```bash
-git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape add -A && git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape commit -m "Scaffold: CMake, vendored deps, Philox RNG, gradient noise
+git -C /mnt/Passport/Worktrees/starscape add -A && git -C /mnt/Passport/Worktrees/starscape commit -m "Scaffold: CMake, vendored deps, Philox RNG, gradient noise
 
 Mutation verified: wrong Philox multiplier reddens the KAT test.
 
@@ -1066,7 +1066,7 @@ Expected: all format test cases pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape add -A && git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape commit -m "kre_starscape.h: format structs, RGB9E5, cube faces, validating parser
+git -C /mnt/Passport/Worktrees/starscape add -A && git -C /mnt/Passport/Worktrees/starscape commit -m "kre_starscape.h: format structs, RGB9E5, cube faces, validating parser
 
 Mutation verified: dropped overlap check and wrong exponent bias both redden.
 
@@ -1385,7 +1385,7 @@ Change young-disk bin 20's fraction `3.021698e-04` to `3.021698e-03` → the mea
 - [ ] **Step 7: Commit**
 
 ```bash
-git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape add -A && git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape commit -m "Stellar populations: Kroupa-derived bin tables, blackbody chroma
+git -C /mnt/Passport/Worktrees/starscape add -A && git -C /mnt/Passport/Worktrees/starscape commit -m "Stellar populations: Kroupa-derived bin tables, blackbody chroma
 
 Mutation verified: a mistyped bin fraction reddens the mean-luminosity check.
 
@@ -1932,7 +1932,7 @@ Expected: all galaxy test cases pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape add -A && git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape commit -m "Galaxy model: disks with log-spiral arms, Hernquist bar, halo, dust lanes, presets
+git -C /mnt/Passport/Worktrees/starscape add -A && git -C /mnt/Passport/Worktrees/starscape commit -m "Galaxy model: disks with log-spiral arms, Hernquist bar, halo, dust lanes, presets
 
 Mutation verified: wrong Hernquist power and a missing axis guard both redden.
 
@@ -2670,7 +2670,7 @@ Make `Finish()` return `{}` unconditionally → "Unknown keys are errors with a 
 - [ ] **Step 7: Commit**
 
 ```bash
-git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape add -A && git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape commit -m "Scene: strict TOML parsing over presets, sky frame
+git -C /mnt/Passport/Worktrees/starscape add -A && git -C /mnt/Passport/Worktrees/starscape commit -m "Scene: strict TOML parsing over presets, sky frame
 
 Mutation verified: disabling unknown-key rejection reddens its test.
 
@@ -3375,7 +3375,7 @@ Expected: all march test cases pass. If the Euclidean absolute count misses by a
 - [ ] **Step 8: Commit**
 
 ```bash
-git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape add -A && git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape commit -m "Ray march: intervals, diffuse/point split, flux histogram, star re-march
+git -C /mnt/Passport/Worktrees/starscape add -A && git -C /mnt/Passport/Worktrees/starscape commit -m "Ray march: intervals, diffuse/point split, flux histogram, star re-march
 
 Mutation verified: dropped s², single-channel extinction and an unbounded density term each redden.
 
@@ -3960,7 +3960,7 @@ Expected: all cook test cases pass. The inside-disk and energy tests run full qu
 - [ ] **Step 8: Commit**
 
 ```bash
-git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape add -A && git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape commit -m "Cook: threshold calibration, parallel texel march, Poisson star drawing
+git -C /mnt/Passport/Worktrees/starscape add -A && git -C /mnt/Passport/Worktrees/starscape commit -m "Cook: threshold calibration, parallel texel march, Poisson star drawing
 
 Mutation verified: double-counting resolved light breaks energy conservation;
 a flat disk loses the band.
@@ -4351,7 +4351,7 @@ Expected: all writer test cases pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape add -A && git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape commit -m "Writer: solid-angle mips, power-of-two value scale, atomic file write
+git -C /mnt/Passport/Worktrees/starscape add -A && git -C /mnt/Passport/Worktrees/starscape commit -m "Writer: solid-angle mips, power-of-two value scale, atomic file write
 
 Mutation verified: thread-keyed jitter, a leaked .partial and unweighted mips each redden.
 
@@ -4735,7 +4735,7 @@ Expected: all preview test cases pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape add -A && git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape commit -m "Preview: seamless cubemap sampling, flux-exact star splats, Radiance writer
+git -C /mnt/Passport/Worktrees/starscape add -A && git -C /mnt/Passport/Worktrees/starscape commit -m "Preview: seamless cubemap sampling, flux-exact star splats, Radiance writer
 
 Mutation verified: a missing solid-angle divide and clamp-only seams both redden.
 
@@ -5266,7 +5266,7 @@ MIT.
 
 - [ ] **Step 6: Build and run every test**
 
-Run build, then `ctest --test-dir /mnt/Passport/Kreatures-Engine/Tooling/Starscape/Build --output-on-failure`.
+Run build, then `ctest --test-dir /mnt/Passport/Worktrees/starscape/Build --output-on-failure`.
 Expected: `unit` and all eight `cli-*` tests pass.
 
 - [ ] **Step 7: Run the reddening mutation**
@@ -5276,7 +5276,7 @@ Make `Report` return 1 for every error kind → `cli-missing-scene` and `cli-mis
 - [ ] **Step 8: Commit**
 
 ```bash
-git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape add -A && git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape commit -m "CLI (cook, preview, inspect), example scene, README
+git -C /mnt/Passport/Worktrees/starscape add -A && git -C /mnt/Passport/Worktrees/starscape commit -m "CLI (cook, preview, inspect), example scene, README
 
 Mutation verified: collapsing exit codes reddens the I/O-failure CLI tests.
 
@@ -5296,13 +5296,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Full test run**
 
-Run `ctest --test-dir /mnt/Passport/Kreatures-Engine/Tooling/Starscape/Build --output-on-failure`. Record the pass/fail counts. All must pass.
+Run `ctest --test-dir /mnt/Passport/Worktrees/starscape/Build --output-on-failure`. Record the pass/fail counts. All must pass.
 
 - [ ] **Step 2: Cook the example scene at final quality**
 
 Run in the background (it may take tens of minutes) and keep the timestamped log:
 ```bash
-nice -n 19 /mnt/Passport/Kreatures-Engine/Tooling/Starscape/Build/starscape cook /mnt/Passport/Kreatures-Engine/Tooling/Starscape/scenes/milky-way-from-earth.toml -o /mnt/Passport/Kreatures-Engine/Tooling/Starscape/Build/milky-way-from-earth.kre_starscape --preview /mnt/Passport/Kreatures-Engine/Tooling/Starscape/Build/milky-way-from-earth.hdr > /mnt/Passport/Kreatures-Engine/Tooling/Starscape/Build/milky-way-from-earth.log 2>&1
+nice -n 19 /mnt/Passport/Worktrees/starscape/Build/starscape cook /mnt/Passport/Worktrees/starscape/scenes/milky-way-from-earth.toml -o /mnt/Passport/Worktrees/starscape/Build/milky-way-from-earth.kre_starscape --preview /mnt/Passport/Worktrees/starscape/Build/milky-way-from-earth.hdr > /mnt/Passport/Worktrees/starscape/Build/milky-way-from-earth.log 2>&1
 ```
 Then `starscape inspect` on the result. Report to the owner: wall time, F_res and its magnitude, star count, the points/diffuse split, the magnitude histogram, dropped stars, file size. The preview is **UNVERIFIED-VISUAL**: hand the owner the `.hdr` path; no gate judges it.
 
@@ -5310,9 +5310,9 @@ Then `starscape inspect` on the result. Report to the owner: wall time, F_res an
 
 Ask the owner before pushing: the repository is public. On approval:
 ```bash
-git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape push origin main
+git -C /mnt/Passport/Worktrees/starscape push origin starscape-v1:main
 ```
-Verify with `git -C /mnt/Passport/Kreatures-Engine/Tooling/Starscape status -sb` that the branch is not `ahead`.
+Verify with `git -C /mnt/Passport/Worktrees/starscape status -sb` that the branch is not `ahead`.
 
 - [ ] **Step 4: Owner gate — register the submodule**
 
