@@ -101,4 +101,50 @@ TEST_CASE("The sky frame is orthonormal with +z on the spin axis")
 	CHECK(glm::dot(sky[0], sky[2]) == doctest::Approx(0.0));
 	CHECK(glm::dot(sky[2], glm::normalize(observer.spinAxis)) == doctest::Approx(1.0));
 	CHECK(glm::dot(glm::cross(sky[0], sky[1]), sky[2]) == doctest::Approx(1.0));   // right-handed
+	CHECK(glm::dot(sky[1], sky[2]) == doctest::Approx(0.0));
+	CHECK(glm::dot(sky[0], glm::normalize(observer.zeroMeridian)) > 0.0);   // a flipped meridian keeps every other property
+}
+
+namespace
+{
+
+constexpr char const* kHead = "[output]\ntarget_stars = 10\n";
+constexpr char const* kObs = "[observer]\nposition = [0.0, 0.0, 0.0]\n";
+
+}
+
+TEST_CASE("Scale lengths and arm pitch are range-checked")
+{
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.disk]\nscale_length = -5.0\n").find("scale_length") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.disk]\narms = {pitch_deg = 0.0}\n").find("pitch_deg") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.disk]\narms = {pitch_deg = 90.0}\n").find("pitch_deg") != std::string::npos);
+}
+
+TEST_CASE("Observer axes must be usable")
+{
+	CHECK(ErrorOf(std::string(kHead) + "[observer]\nposition = [0.0, 0.0, 0.0]\nspin_axis = [0.0, 0.0, 0.0]\n[[galaxy]]\npreset = \"dwarf\"\n").find("spin_axis") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + "[observer]\nposition = [0.0, 0.0, 0.0]\nspin_axis = [0.0, 0.0, 1.0]\nzero_meridian = [0.0, 0.0, -3.0]\n[[galaxy]]\npreset = \"dwarf\"\n").find("parallel") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + "[observer]\nposition = [0.0, 0.0, 0.0]\nzero_meridian = [0.0, 0.0, 0.0]\n[[galaxy]]\npreset = \"dwarf\"\n").find("zero_meridian") != std::string::npos);
+}
+
+TEST_CASE("Vectors are bounded")
+{
+	CHECK(ErrorOf(std::string(kHead) + "[observer]\nposition = [1e300, 0.0, 0.0]\n[[galaxy]]\npreset = \"dwarf\"\n").find("within") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\nposition = [0.0, 1e300, 0.0]\n").find("within") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\nrotation = [0.0, 0.0, 1e11]\n").find("within") != std::string::npos);
+}
+
+TEST_CASE("Unknown keys inside nested tables are errors")
+{
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.disk]\nscale_hieght = 3.0\n").find("unknown key") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.disk]\narms = {cuont = 2}\n").find("arms.cuont") != std::string::npos);
+}
+
+TEST_CASE("An enabled component must be usable")
+{
+	std::string const tail = std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\n";
+	CHECK(ErrorOf(tail + "[galaxy.thick_disk]\ndensity = 0.1\ncutoff = 5000\n").find("no population") != std::string::npos);
+	CHECK(ErrorOf(tail + "[galaxy.thick_disk]\ndensity = 0.1\npopulation = \"old-disk\"\n").find("no cutoff") != std::string::npos);
+	CHECK(ErrorOf(tail + "[galaxy.dust]\nextinction = 0.1\n").find("no cutoff") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\n[galaxy.disk]\narm_young_fraction = 0.5\n").find("arm_population") != std::string::npos);
 }

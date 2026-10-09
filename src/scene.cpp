@@ -27,6 +27,8 @@ uint64_t Fnv1a64(std::string_view bytes)
 }
 
 constexpr double kHuge = 1e12;
+// Positions and angles beyond this overflow squared distances in the galaxy math.
+constexpr double kVectorLimit = 1e10;
 
 // Reads one TOML table, remembering every key it was asked for so Finish() can reject the rest:
 // a misspelt key must not silently fall back to a preset value.
@@ -156,6 +158,10 @@ public:
 			{
 				return Fail(element.source(), key, "expected an array of three numbers");
 			}
+			if (std::abs(*value) > kVectorLimit)
+			{
+				return Fail(element.source(), key, std::format("components must be within +-{}", kVectorLimit));
+			}
 			out[int(i)] = *value;
 		}
 		return {};
@@ -257,6 +263,25 @@ Expected<void> ReadArms(TableReader& parent, Arms& arms)
 	return reader.Finish();
 }
 
+// A preset leaves unused components with no population and no cutoff; enabling one from a scene
+// must not let that reach the sampler as an out-of-range population index.
+Expected<void> CheckUsable(TableReader const& reader, std::string_view name, bool enabled, int population, double cutoff)
+{
+	if (!enabled)
+	{
+		return {};
+	}
+	if (population < 0)
+	{
+		return reader.Fail("", std::format("{} is enabled but has no population", name));
+	}
+	if (cutoff <= 0.0)
+	{
+		return reader.Fail("", std::format("{} is enabled but has no cutoff", name));
+	}
+	return {};
+}
+
 Expected<void> ReadDisk(TableReader& parent, std::string_view key, Disk& disk, std::span<Population const> populations, bool thin)
 {
 	STARSCAPE_TRY_ASSIGN(table, parent.Table(key));
@@ -277,7 +302,12 @@ Expected<void> ReadDisk(TableReader& parent, std::string_view key, Disk& disk, s
 		STARSCAPE_TRY(ReadPopulation(reader, "arm_population", populations, disk.armPopulation));
 		STARSCAPE_TRY(reader.Number("arm_young_fraction", disk.armYoungFraction, 0.0, 1.0));
 		STARSCAPE_TRY(ReadArms(reader, disk.arms));
+		if (disk.enabled && disk.armYoungFraction > 0.0 && disk.armPopulation < 0)
+		{
+			return reader.Fail("arm_young_fraction", "needs arm_population to be set");
+		}
 	}
+	STARSCAPE_TRY(CheckUsable(reader, key, disk.enabled, disk.population, disk.cutoff));
 	return reader.Finish();
 }
 
@@ -298,6 +328,7 @@ Expected<void> ReadBulge(TableReader& parent, Bulge& bulge, std::span<Population
 	STARSCAPE_TRY(reader.Number("bar_angle_deg", bulge.barAngleDeg, -180.0, 180.0));
 	STARSCAPE_TRY(reader.Number("cutoff", bulge.cutoff, 0.0, kHuge));
 	STARSCAPE_TRY(ReadPopulation(reader, "population", populations, bulge.population));
+	STARSCAPE_TRY(CheckUsable(reader, "bulge", bulge.enabled, bulge.population, bulge.cutoff));
 	return reader.Finish();
 }
 
@@ -315,6 +346,7 @@ Expected<void> ReadHalo(TableReader& parent, Halo& halo, std::span<Population co
 	STARSCAPE_TRY(reader.Number("scale", halo.scale, 1e-3, kHuge));
 	STARSCAPE_TRY(reader.Number("cutoff", halo.cutoff, 0.0, kHuge));
 	STARSCAPE_TRY(ReadPopulation(reader, "population", populations, halo.population));
+	STARSCAPE_TRY(CheckUsable(reader, "halo", halo.enabled, halo.population, halo.cutoff));
 	return reader.Finish();
 }
 
@@ -335,6 +367,7 @@ Expected<void> ReadDust(TableReader& parent, Dust& dust)
 	STARSCAPE_TRY(reader.Number("lane_offset", dust.laneOffset, -5.0, 5.0));
 	STARSCAPE_TRY(reader.Number("contrast", dust.contrast, 0.0, 1000.0));
 	STARSCAPE_TRY(reader.Number("filament", dust.filament, 0.0, 10.0));
+	STARSCAPE_TRY(CheckUsable(reader, "dust", dust.enabled, 0, dust.cutoff));
 	return reader.Finish();
 }
 
@@ -448,13 +481,18 @@ Expected<void> ReadObserver(TableReader& root, Observer& observer)
 	STARSCAPE_TRY(reader.Vector("spin_axis", observer.spinAxis));
 	STARSCAPE_TRY(reader.Vector("zero_meridian", observer.zeroMeridian));
 	STARSCAPE_TRY(reader.Number("s_min", observer.sMin, 1e-6, 1e6));
-	if (glm::length(observer.spinAxis) < 1e-9)
+	if (glm::length(observer.spinAxis) < 1e-6)
 	{
-		return reader.Fail("spin_axis", "must not be zero");
+		return reader.Fail("spin_axis", "must have length of at least 1e-6");
+	}
+	double const meridianLength = glm::length(observer.zeroMeridian);
+	if (meridianLength < 1e-6)
+	{
+		return reader.Fail("zero_meridian", "must have length of at least 1e-6");
 	}
 	glm::dvec3 const z = glm::normalize(observer.spinAxis);
 	glm::dvec3 const across = observer.zeroMeridian - glm::dot(observer.zeroMeridian, z) * z;
-	if (glm::length(across) < 1e-6 * std::max(1.0, glm::length(observer.zeroMeridian)))
+	if (glm::length(across) < 1e-6 * meridianLength)
 	{
 		return reader.Fail("zero_meridian", "must not be parallel to spin_axis");
 	}
