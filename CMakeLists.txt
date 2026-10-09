@@ -17,6 +17,7 @@ set(STARSCAPE_SOURCES
 	src/population.cpp
 	src/galaxy.cpp
 	src/presets.cpp
+	src/scene.cpp
 )
 
 add_library(starscape-core STATIC ${STARSCAPE_SOURCES})
@@ -36,6 +37,7 @@ set(STARSCAPE_TESTS
 	tests/test_format.cpp
 	tests/test_galaxy.cpp
 	tests/test_population.cpp
+	tests/test_scene.cpp
 )
 add_executable(starscape-tests ${STARSCAPE_TESTS})
 target_link_libraries(starscape-tests PRIVATE starscape-core)
