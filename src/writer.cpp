@@ -48,25 +48,39 @@ std::vector<std::vector<glm::dvec3>> BuildMips(uint32_t faceSize, std::vector<gl
 
 float ChooseValueScale(double maxValue)
 {
-	if (!(maxValue > 0.0))
+	if (!(maxValue > 0.0) || !std::isfinite(maxValue))
 	{
 		return 1.0f;
 	}
-	int const exponent = std::clamp(int(std::floor(std::log2(32768.0 / maxValue))), -100, 100);
-	return std::ldexp(1.0f, exponent);
+	// Clamped while still a double: a denormal maximum makes the quotient infinite, and
+	// converting an out-of-range double to int is undefined.
+	double const exponent = std::clamp(std::floor(std::log2(32768.0 / maxValue)), -100.0, 100.0);
+	return std::ldexp(1.0f, int(exponent));
 }
 
 std::vector<uint8_t> BuildFile(Cooked const& cooked, uint64_t sceneHash)
 {
 	std::vector<std::vector<glm::dvec3>> const levels = BuildMips(cooked.faceSize, cooked.diffuse);
 	double maxValue = 0.0;
+	// Non-finite values are skipped explicitly: the encoder zeroes NaN and clamps infinity,
+	// so they must not set the scale (std::max's NaN behaviour depends on argument order).
+	auto accumulate = [&maxValue](glm::dvec3 const& v)
+	{
+		for (int i = 0; i < 3; ++i)
+		{
+			if (std::isfinite(v[i]) && v[i] > maxValue)
+			{
+				maxValue = v[i];
+			}
+		}
+	};
 	for (glm::dvec3 const& v : cooked.diffuse)
 	{
-		maxValue = std::max({maxValue, v.x, v.y, v.z});
+		accumulate(v);
 	}
 	for (CookedStar const& star : cooked.stars)
 	{
-		maxValue = std::max({maxValue, star.flux.x, star.flux.y, star.flux.z});
+		accumulate(star.flux);
 	}
 	float const scale = ChooseValueScale(maxValue);
 
@@ -141,6 +155,12 @@ Expected<void> WriteFileAtomic(std::filesystem::path const& path, std::span<uint
 
 Expected<std::vector<uint8_t>> ReadFileBytes(std::filesystem::path const& path)
 {
+	// ifstream opens a directory successfully on Linux and tellg then returns garbage.
+	std::error_code statError;
+	if (!std::filesystem::is_regular_file(path, statError))
+	{
+		return IoError(std::format("{}: not a regular file", path.string()));
+	}
 	std::ifstream file(path, std::ios::binary | std::ios::ate);
 	if (!file)
 	{

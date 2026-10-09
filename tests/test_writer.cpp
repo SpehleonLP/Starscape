@@ -4,7 +4,10 @@
 #include <doctest.h>
 #include <cmath>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <limits>
+#include <unistd.h>
 
 using namespace starscape;
 using namespace starscape::test;
@@ -72,10 +75,31 @@ TEST_CASE("A cooked sky round-trips through the file")
 	}
 	auto const levels = BuildMips(4, cooked.diffuse);
 	ExpectClose(Decoded(view, 1, 5, 1, 1), levels[1][5 * 4 + 1 * 2 + 1]);
-	kre_starscape::Star const star = kre_starscape::StarAt(view, 0);
-	CHECK(star.dir[2] == 1.0f);
-	auto const flux = kre_starscape::DecodeRGB9E5(star.fluxRGB9E5);
-	ExpectClose(glm::dvec3(flux[0], flux[1], flux[2]) / double(view.header.valueScale), {3.0, 2.0, 1.0});
+	// The 1x1 level, against a weighted mean computed here rather than by BuildMips.
+	for (uint32_t face = 0; face < 6; ++face)
+	{
+		glm::dvec3 sum(0.0);
+		double weight = 0.0;
+		for (uint32_t y = 0; y < 4; ++y)
+		{
+			for (uint32_t x = 0; x < 4; ++x)
+			{
+				double const omega = kre_starscape::TexelSolidAngle(4, x, y);
+				sum += omega * cooked.diffuse[(face * 4 + y) * 4 + x];
+				weight += omega;
+			}
+		}
+		ExpectClose(Decoded(view, 2, face, 0, 0), sum / weight);
+	}
+	for (uint32_t i = 0; i < cooked.stars.size(); ++i)
+	{
+		kre_starscape::Star const star = kre_starscape::StarAt(view, i);
+		CHECK(star.dir[0] == float(cooked.stars[i].dir.x));
+		CHECK(star.dir[1] == float(cooked.stars[i].dir.y));
+		CHECK(star.dir[2] == float(cooked.stars[i].dir.z));
+		auto const flux = kre_starscape::DecodeRGB9E5(star.fluxRGB9E5);
+		ExpectClose(glm::dvec3(flux[0], flux[1], flux[2]) / double(view.header.valueScale), cooked.stars[i].flux);
+	}
 }
 
 TEST_CASE("A dark sky keeps its precision")
@@ -111,6 +135,10 @@ TEST_CASE("The value scale is a power of two that keeps the maximum in range")
 		CHECK(maxValue * scale > 16384.0 * 0.999);
 	}
 	CHECK(ChooseValueScale(0.0) == 1.0f);
+	CHECK(ChooseValueScale(std::numeric_limits<double>::infinity()) == 1.0f);
+	CHECK(ChooseValueScale(std::numeric_limits<double>::quiet_NaN()) == 1.0f);
+	CHECK(ChooseValueScale(1e-310) == std::ldexp(1.0f, 100));
+	CHECK(ChooseValueScale(1e300) == std::ldexp(1.0f, -100));
 }
 
 TEST_CASE("Cooks are byte-identical on any thread count")
@@ -123,7 +151,7 @@ TEST_CASE("Cooks are byte-identical on any thread count")
 
 TEST_CASE("Writes land atomically")
 {
-	std::filesystem::path const dir = std::filesystem::temp_directory_path() / "starscape-writer-test";
+	std::filesystem::path const dir = std::filesystem::temp_directory_path() / std::format("starscape-writer-test-{}", getpid());
 	std::filesystem::remove_all(dir);
 	std::filesystem::create_directories(dir);
 	std::vector<uint8_t> const bytes = {1, 2, 3, 4};
@@ -150,5 +178,8 @@ TEST_CASE("Writes land atomically")
 		CHECK(result.error().kind == Error::Kind::Io);
 	}
 	CHECK(ReadFileBytes(dir / "absent.kre_starscape").error().kind == Error::Kind::Io);
+	Expected<std::vector<uint8_t>> const directory = ReadFileBytes(dir);
+	REQUIRE_FALSE(directory.has_value());
+	CHECK(directory.error().kind == Error::Kind::Io);
 	std::filesystem::remove_all(dir);
 }
