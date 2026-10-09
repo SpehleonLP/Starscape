@@ -30,6 +30,7 @@ set(STARSCAPE_TESTS
 	tests/main.cpp
 	tests/test_rng.cpp
 	tests/test_noise.cpp
+	tests/test_format.cpp
 )
 add_executable(starscape-tests ${STARSCAPE_TESTS})
 target_link_libraries(starscape-tests PRIVATE starscape-core)
