@@ -123,6 +123,22 @@ TEST_CASE("The arm population keeps its own, thinner scale height")
 	CHECK(above.parts[1].density / plane.parts[1].density == doctest::Approx(Sech2(400.0 / 180.0)));
 }
 
+// Mutation: drop youngFraction from the young share and the between-arms check fails.
+TEST_CASE("Young stars sit between the arms too")
+{
+	Galaxy galaxy;
+	galaxy.disk = {.enabled = true, .density = 1.0, .scaleLength = 3000.0, .scaleHeight = 300.0, .cutoff = 30000.0,
+		.arms = {.count = 2, .pitchDeg = 15.0, .width = 300.0, .contrast = 3.0, .clumping = 0.0, .phaseDeg = 0.0, .r0 = 1000.0},
+		.population = 1, .armPopulation = 0, .armYoungFraction = 0.1, .armScaleHeight = 90.0, .youngFraction = 0.01};
+	double const radius = 5000.0;
+	// Half an arm period from the crest: ArmProximity is ~e^-120 there.
+	double const between = std::log(radius / 1000.0) / std::tan(15.0 * kPi / 180.0) + kPi / 2.0;
+	GalaxySample sample;
+	EvaluateLocal(galaxy, {radius * std::cos(between), radius * std::sin(between), 0.0}, sample);
+	REQUIRE(sample.count == 2);
+	CHECK(sample.parts[1].density / TotalDensity(sample) == doctest::Approx(0.01));
+}
+
 TEST_CASE("Rotation maps scene positions into the galaxy frame")
 {
 	// Mutation: dropping the transpose or reordering the axes reddens this test.

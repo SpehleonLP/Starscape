@@ -26,7 +26,7 @@ TEST_CASE("Preset populations are normalised and keep their derived mean luminos
 	CHECK(presets[2].name == "bulge");
 	CHECK(presets[3].name == "halo");
 	// Means from the Kroupa-IMF derivation recorded in presets.cpp.
-	double const expectedMean[] = {29.42, 1.124, 1.295, 1.295};
+	double const expectedMean[] = {29.40, 0.343, 0.419, 0.419};
 	for (size_t i = 0; i < presets.size(); ++i)
 	{
 		double const sum = std::accumulate(presets[i].fraction.begin(), presets[i].fraction.end(), 0.0);

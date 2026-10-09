@@ -136,7 +136,9 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 			modulation = std::max(0.0, 1.0 + (disk.arms.contrast - 1.0) * crest * clumps);
 		}
 		double const midplane = disk.density * std::exp(-radius / disk.scaleLength) * modulation;
-		double const young = disk.armPopulation >= 0 ? std::min(1.0, disk.armYoungFraction * crest * clumps) : 0.0;
+		// Young stars concentrate on arms but are not confined to them: the Sun sits between arms,
+		// yet half the brightest stars in Earth's sky are young B stars.
+		double const young = disk.armPopulation >= 0 ? std::min(1.0, (disk.youngFraction + disk.armYoungFraction * crest) * clumps) : 0.0;
 		push(midplane * (1.0 - young) * Sech2(p.z / (2.0 * disk.scaleHeight)), disk.population);
 		// Young stars have not yet been heated out of the plane: sharing the old disk's thickness turns
 		// each nearby arm into a wall whose tangent draws a hard edge from horizon to zenith.

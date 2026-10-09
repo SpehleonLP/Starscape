@@ -33,6 +33,7 @@ struct Disk
 	int    armPopulation    = -1;       // -1: arms modulate density only
 	double armYoungFraction = 0.0;      // share of armPopulation on an arm's crest, at the midplane
 	double armScaleHeight   = 0.0;      // the arm population's own scale height; 0: the disk's
+	double youngFraction    = 0.0;      // armPopulation share everywhere in the midplane, arms or not
 };
 
 // Hernquist profile n_b a / (r' (r' + a)³) over a radius r' stretched along a bar.
