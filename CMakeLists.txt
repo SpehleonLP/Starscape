@@ -21,6 +21,7 @@ set(STARSCAPE_SOURCES
 	src/march.cpp
 	src/cook.cpp
 	src/writer.cpp
+	src/preview.cpp
 )
 
 add_library(starscape-core STATIC ${STARSCAPE_SOURCES})
@@ -44,6 +45,7 @@ set(STARSCAPE_TESTS
 	tests/test_march.cpp
 	tests/test_cook.cpp
 	tests/test_writer.cpp
+	tests/test_preview.cpp
 )
 add_executable(starscape-tests ${STARSCAPE_TESTS})
 target_link_libraries(starscape-tests PRIVATE starscape-core)
