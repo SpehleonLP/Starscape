@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <format>
+#include <limits>
 #include <string>
 #include <glm/geometric.hpp>
 
@@ -41,7 +42,14 @@ void SplatStars(kre_starscape::View const& view, double exposure, Image& image)
 		kre_starscape::Star const star = kre_starscape::StarAt(view, i);
 		auto const packed = kre_starscape::DecodeRGB9E5(star.fluxRGB9E5);
 		glm::dvec3 const flux = glm::dvec3(packed[0], packed[1], packed[2]) * (exposure / double(view.header.valueScale));
-		glm::dvec3 const dir = glm::normalize(glm::dvec3(star.dir[0], star.dir[1], star.dir[2]));
+		// A corrupt file can carry any bits; a bad star is skipped rather than fed to floor/asin.
+		glm::dvec3 const rawDir(star.dir[0], star.dir[1], star.dir[2]);
+		double const length = glm::length(rawDir);
+		if (!std::isfinite(length) || length < 1e-12 || !std::isfinite(flux.x + flux.y + flux.z))
+		{
+			continue;
+		}
+		glm::dvec3 const dir = rawDir / length;
 		double const longitude = std::atan2(dir.y, dir.x);
 		double const latitude = std::asin(std::clamp(dir.z, -1.0, 1.0));
 		// Continuous coordinates where integer + 0.5 is a pixel centre.
@@ -173,9 +181,15 @@ std::vector<uint8_t> EncodeRadiance(Image const& image)
 	bytes.reserve(bytes.size() + size_t(image.width) * image.height * 4);
 	for (size_t i = 0; i + 2 < image.rgb.size(); i += 3)
 	{
-		float const r = std::max(image.rgb[i], 0.0f);
-		float const g = std::max(image.rgb[i + 1], 0.0f);
-		float const b = std::max(image.rgb[i + 2], 0.0f);
+		// std::max(NaN, 0) keeps the NaN, and a cast of NaN or an overflowing value is undefined, so
+		// marched radiance that went bad must be flattened before it reaches the byte conversions.
+		auto sanitise = [](float c)
+		{
+			return c > 0.0f ? std::min(c, std::numeric_limits<float>::max()) : 0.0f;
+		};
+		float const r = sanitise(image.rgb[i]);
+		float const g = sanitise(image.rgb[i + 1]);
+		float const b = sanitise(image.rgb[i + 2]);
 		float const v = std::max({r, g, b});
 		if (!(v >= 1e-32f))
 		{
@@ -185,7 +199,9 @@ std::vector<uint8_t> EncodeRadiance(Image const& image)
 		int exponent = 0;
 		float const mantissa = std::frexp(v, &exponent);
 		float const scale = mantissa * 256.0f / v;
-		bytes.insert(bytes.end(), {uint8_t(r * scale), uint8_t(g * scale), uint8_t(b * scale), uint8_t(exponent + 128)});
+		// Rounding up near a power of two can reach 256, which would wrap to 0.
+		auto mantissaByte = [scale](float c) { return uint8_t(std::min(c * scale, 255.0f)); };
+		bytes.insert(bytes.end(), {mantissaByte(r), mantissaByte(g), mantissaByte(b), uint8_t(std::min(exponent + 128, 255))});
 	}
 	return bytes;
 }

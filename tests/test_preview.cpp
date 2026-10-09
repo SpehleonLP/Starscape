@@ -3,6 +3,7 @@
 #include <kre_starscape.h>
 #include <doctest.h>
 #include <cmath>
+#include <limits>
 #include <vector>
 #include <string>
 
@@ -106,4 +107,61 @@ TEST_CASE("Radiance RGBE encoding")
 	CHECK(bytes[header.size() + 2] == 32);
 	CHECK(bytes[header.size() + 3] == 129);
 	CHECK(bytes[header.size() + 7] == 0);
+}
+
+TEST_CASE("Radiance encoding survives NaN, infinity and near-power-of-two values")
+{
+	float const nan = std::numeric_limits<float>::quiet_NaN();
+	float const inf = std::numeric_limits<float>::infinity();
+	Image image{3, 1, {nan, inf, -1.0f, 0.99999f, 0.99999f, 0.5f, nan, -2.0f, nan}};
+	std::vector<uint8_t> const bytes = EncodeRadiance(image);
+	std::string const header = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 3\n";
+	REQUIRE(bytes.size() == header.size() + 12);
+	auto decode = [&](size_t pixel, size_t channel)
+	{
+		size_t const base = header.size() + pixel * 4;
+		return std::ldexp(double(bytes[base + channel]) + 0.5, int(bytes[base + 3]) - 136);
+	};
+	// Pixel 0: NaN and negative flatten to zero (mantissa byte 0); infinity becomes huge but finite.
+	CHECK(bytes[header.size() + 0] == 0);
+	CHECK(bytes[header.size() + 2] == 0);
+	CHECK(bytes[header.size() + 1] == 255);
+	CHECK(bytes[header.size() + 3] == 255);
+	CHECK(decode(0, 1) > 1e30);
+	CHECK(std::isfinite(decode(0, 1)));
+	// Pixel 1: 0.99999 must stay near 1, not wrap to a small mantissa byte.
+	CHECK(decode(1, 0) == doctest::Approx(1.0).epsilon(0.01));
+	CHECK(decode(1, 1) == doctest::Approx(1.0).epsilon(0.01));
+	CHECK(decode(1, 2) == doctest::Approx(0.5).epsilon(0.01));
+	// Pixel 2: nothing but NaN and negatives is black.
+	for (size_t k = 0; k < 4; ++k)
+	{
+		CHECK(bytes[header.size() + 8 + k] == 0);
+	}
+}
+
+TEST_CASE("Stars with bad directions or fluxes are skipped")
+{
+	Cooked cooked;
+	cooked.faceSize = 1;
+	cooked.diffuse = std::vector<glm::dvec3>(6, glm::dvec3(0.0));
+	cooked.fluxThreshold = 0.01;
+	double const nan = std::numeric_limits<double>::quiet_NaN();
+	cooked.stars = {{{0.0, 0.0, 0.0}, {5.0, 5.0, 5.0}}, {{1.0, 0.0, 0.0}, {nan, nan, nan}}, {{0.0, 1.0, 0.0}, {1.0, 2.0, 3.0}}};
+	std::vector<uint8_t> const bytes = BuildFile(cooked, 0);
+	kre_starscape::View view;
+	REQUIRE(kre_starscape::Parse(bytes, view) == kre_starscape::Result::Ok);
+	Image const image = RenderPreview(view, 256, 0.0, 1);
+	glm::dvec3 total(0.0);
+	for (uint32_t row = 0; row < image.height; ++row)
+	{
+		for (uint32_t column = 0; column < image.width; ++column)
+		{
+			size_t const i = (size_t(row) * image.width + column) * 3;
+			total += glm::dvec3(image.rgb[i], image.rgb[i + 1], image.rgb[i + 2]) * PixelSolidAngle(image.width, row);
+		}
+	}
+	CHECK(total.x == doctest::Approx(1.0).epsilon(0.005));
+	CHECK(total.y == doctest::Approx(2.0).epsilon(0.005));
+	CHECK(total.z == doctest::Approx(3.0).epsilon(0.005));
 }
