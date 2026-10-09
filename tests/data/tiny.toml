@@ -1,0 +1,11 @@
+[output]
+face_size = 16
+target_stars = 300
+quality = "quick"
+preview = { width = 256 }
+
+[observer]
+position = [8200.0, 0.0, 20.0]
+
+[[galaxy]]
+preset = "milky-way"

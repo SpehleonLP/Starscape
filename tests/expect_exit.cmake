@@ -1,0 +1,11 @@
+# Runs EXE with ARG1..ARG6 and fails unless it exits with EXPECT.
+set(arguments "")
+foreach(i RANGE 1 6)
+	if(DEFINED ARG${i})
+		list(APPEND arguments "${ARG${i}}")
+	endif()
+endforeach()
+execute_process(COMMAND "${EXE}" ${arguments} RESULT_VARIABLE code)
+if(NOT code EQUAL EXPECT)
+	message(FATAL_ERROR "expected exit ${EXPECT}, got ${code}")
+endif()

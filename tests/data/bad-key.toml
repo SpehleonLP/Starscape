@@ -1,0 +1,10 @@
+[output]
+face_size = 16
+target_stars = 300
+qualty = "quick"
+
+[observer]
+position = [0.0, 0.0, 0.0]
+
+[[galaxy]]
+preset = "dwarf"
