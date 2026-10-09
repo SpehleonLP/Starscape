@@ -1,6 +1,6 @@
 # Starscape — design spec
 
-Status: draft for owner review, 2026-10-09.
+Status: approved 2026-10-09; refined during planning (valueScale, explicit cutoffs, arm young fraction, C++23, own .hdr writer).
 
 Starscape is an offline command-line tool that cooks a night sky for a given
 vantage point inside (or outside) one or more procedural galaxies. It writes a
@@ -76,7 +76,7 @@ n(x) in stars/pc³ (galaxy frame) and names a stellar population (see *Stellar p
 |---|---|---|
 | Thin disk | n₀ · exp(−R/R_d) · sech²(z / 2h_z) · A(R, φ) | `young-disk` in the arms, `old-disk` between them |
 | Thick disk (optional) | n₀ₜ · exp(−R/R_dₜ) · sech²(z / 2h_zₜ) | `old-disk` |
-| Bulge / bar | Hernquist: n_b · a / (r′ (r′ + a)³), r′ the radius after scaling the bar axes | `bulge` |
+| Bulge / bar | Hernquist: n_b · a / (r′ (r′ + a)³), r′ the radius after scaling the bar axes (floored at 1 pc) | `bulge` |
 | Halo | n_h · (1 + r/r_h)^(−3.5) | `halo` |
 
 R is the cylindrical radius, φ the azimuth and r the spherical radius in the
@@ -93,8 +93,13 @@ parsecs). Then
 
 clamped to ≥ 0, where w is the arm width and fbm is 4-octave gradient noise in
 the galaxy frame (base wavelength = w), seeded by the galaxy's seed. The arm
-fraction a = exp(−d² / 2w²) also blends the thin disk's population: weight a
-goes to `young-disk`, 1 − a to `old-disk`.
+fraction a = exp(−d² / 2w²) also blends the thin disk's population: weight
+`arm_young_fraction` × a (default 0.05) goes to its `arm_population`
+(`young-disk`), the rest to its `population` (`old-disk`). Young stars are a small
+share by number but, at ~26× the mean luminosity, dominate an arm's light.
+
+Every component has an explicit `cutoff` radius in parsecs (presets set them).
+The bulge radius r′ is floored at 1 pc so an observer at the core stays finite.
 
 ### Dust
 
@@ -198,7 +203,8 @@ drawn star:
 - its direction is uniform in the texel's solid angle (rejection-sampled on the
   cube face against the solid-angle Jacobian);
 - its distance is sampled by **re-marching that direction** and inverting the
-  cumulative resolved count along it for bin i (only drawn stars re-march, so
+  cumulative resolved count along it for bin i (linear within a march step; a
+  star the interpolation leaves a hair under F_res is raised to F_res) (only drawn stars re-march, so
   memory stays at one float per texel per bin, 37 MB at S = 256);
 - its luminosity is the bin's L_i — the same value the classification used, so
   the star is resolved at its sampled distance by construction and the split is
@@ -238,8 +244,8 @@ struct kre_starscape_header {       // 64 bytes
     uint64_t diffuseOffset;
     uint64_t diffuseBytes;
     uint64_t starsOffset;
-    float    fluxThreshold;         // F_res, mag-0 flux units
-    uint8_t  pad[4];
+    float    fluxThreshold;         // F_res, mag-0 flux units (physical)
+    float    valueScale;            // stored radiance and flux = physical × valueScale
 };
 
 struct kre_starscape_star {         // 16 bytes; uploads as a vertex buffer as-is
@@ -334,8 +340,14 @@ position = [780000.0, 120000.0, -40000.0]
 ```
 
 - Galaxy presets: `milky-way`, `small-spiral`, `elliptical`, `dwarf`. A preset
-  supplies every field; the scene overrides any of them. Each component table
-  (`disk`, `thick_disk`, `bulge`, `halo`, `dust`) may set `enabled = false`.
+  supplies every field; the scene overrides any of them. A component table
+  (`disk`, `thick_disk`, `bulge`, `halo`, `dust`) that is present enables that
+  component unless it sets `enabled = false`.
+- `[output] seed` (default 1) keys the jitter and star draws; galaxies keep
+  their own `seed` for noise.
+- Diffuse range: RGB9E5 holds full 9-bit relative precision over ~32 stops
+  (1.5 × 10⁻⁵ to 65408); `valueScale` is the power of two that puts the sky's
+  brightest stored value in (16384, 32768], giving the dark end every other stop.
 - Population presets: `young-disk`, `old-disk`, `bulge`, `halo`; components name
   theirs with `population = "..."`.
 - Unknown keys, wrong types, out-of-range values (negative scale lengths, pitch
@@ -374,7 +386,7 @@ recorded in the test's comment.
 | Energy conservation | Milky Way scene: total sky flux (points + diffuse) at budgets 500, 4000, 20 000 agrees within 3σ Poisson noise of the points | classify a step as both resolved and diffuse, or as neither |
 | Distant galaxy | Dust-free galaxy at 1 Mpc: total sky flux = Σ L · (10/d)² · 10^(−1.932) within 1 % | restore an unbounded density term |
 | Dust slab | Uniform slab of optical depth τ in front of a point source: per-channel flux ratio = exp(−k_c τ) within 0.5 % | apply k_G to all channels |
-| Inside a disk | Milky Way, observer at R = 8.2 kpc, z = 20 pc: mean diffuse radiance within 5° of the galactic plane ≥ 10× within 5° of the poles; point density in the same bands has ratio in [1.5, 4] | replace the sech² with 1 |
+| Inside a disk | Milky Way, observer at R = 8.2 kpc, z = 20 pc, 20 000 stars: mean diffuse radiance within 5° of the galactic plane ≥ 10× within 5° of the poles; point density per steradian within 10° of the plane vs above 60° latitude in [1.5, 4] (wider bands than the diffuse check so the counts are not noise-limited) | replace the sech² with 1 |
 | Determinism | Quick cook with 1 thread and with 8 threads: byte-identical files | seed draws by thread index |
 | Format round trip | Write then `Parse`: every field and payload byte equal | — |
 | Format rejection | `Parse` rejects every truncation length, each offset/size pushed past EOF, overlapping regions, bad magic/version/encoding, mip count inconsistent with face size | delete any one validation check |
@@ -385,24 +397,25 @@ recorded in the test's comment.
 
 ```
 Starscape/
-  CMakeLists.txt                 # C++20; targets: starscape, starscape-tests
+  CMakeLists.txt                 # C++23; targets: starscape, starscape-tests
   include/kre_starscape.h        # public format + reader
   src/
     cli.cpp                      # argument parsing, top-level error printing
     scene.h/.cpp                 # TOML -> Scene, validation
     presets.h/.cpp               # galaxy and population presets
-    galaxy.h/.cpp                # components, arm modulation, bounding spheres
+    galaxy.h/.cpp                # components, arm modulation, dust field, bounding spheres
     population.h/.cpp            # bins, chromaticity
-    dust.h/.cpp                  # extinction field
+    common.h                     # Error, Expected, TRY macros
     noise.h/.cpp                 # gradient noise, fbm
     rng.h                        # Philox 4x32-10
-    march.h/.cpp                 # calibration pass, main march, re-march
-    stars.h/.cpp                 # Poisson draws, star records
+    march.h/.cpp                 # intervals, per-ray march, flux histogram, star re-march
+    parallel.h                   # deterministic ParallelFor
+    cook.h/.cpp                  # calibration, texel march, Poisson star drawing
     writer.h/.cpp                # mips, file assembly, atomic rename
     preview.h/.cpp               # equirect render, splats, RGBE write
   scenes/milky-way-from-earth.toml
   third_party/                   # vendored single headers, versions in third_party/VERSIONS
-    glm/  toml.hpp  stb_image_write.h  doctest.h
+    glm/  toml.hpp  doctest.h    # the Radiance .hdr writer is ~30 lines in preview.cpp
   tests/
   docs/spec.md
   README.md                      # usage, units, citations
