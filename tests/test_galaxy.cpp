@@ -105,15 +105,47 @@ TEST_CASE("Arms split the thin disk between its old and young populations")
 TEST_CASE("Rotation maps scene positions into the galaxy frame")
 {
 	Galaxy galaxy;
-	galaxy.disk = {.enabled = true, .density = 1.0, .scaleLength = 3000.0, .scaleHeight = 300.0, .cutoff = 30000.0, .arms = {}, .population = 0};
-	galaxy.position = {100.0, 0.0, 0.0};
-	galaxy.rotationDeg = {90.0, 0.0, 0.0};
+	galaxy.disk = {.enabled = true, .density = 1.0, .scaleLength = 3000.0, .scaleHeight = 300.0, .cutoff = 30000.0,
+		.arms = {.count = 2, .pitchDeg = 15.0, .width = 300.0, .contrast = 3.0, .clumping = 0.0, .phaseDeg = 0.0, .r0 = 1000.0},
+		.population = 0};
+	galaxy.bulge = {.enabled = true, .density = 1000.0, .scale = 500.0, .axisY = 0.5, .axisZ = 0.3, .barAngleDeg = 30.0, .cutoff = 5000.0, .population = 0};
+	galaxy.position = {100.0, -50.0, 25.0};
+	galaxy.rotationDeg = {30.0, 50.0, 20.0};
 	PreparedGalaxy const prepared = PrepareGalaxy(galaxy);
-	GalaxySample rotated;
-	GalaxySample reference;
-	Evaluate(prepared, {100.0, 0.0, 2000.0}, rotated);   // in the rotated disk's plane
-	EvaluateLocal(galaxy, {0.0, 2000.0, 0.0}, reference);
-	CHECK(TotalDensity(rotated) == doctest::Approx(TotalDensity(reference)));
+
+	// Built independently of PrepareGalaxy: the documented order is Z, then Y, then X.
+	auto rx = [](double a) { return glm::dmat3(1, 0, 0, 0, std::cos(a), std::sin(a), 0, -std::sin(a), std::cos(a)); };
+	auto ry = [](double a) { return glm::dmat3(std::cos(a), 0, -std::sin(a), 0, 1, 0, std::sin(a), 0, std::cos(a)); };
+	auto rz = [](double a) { return glm::dmat3(std::cos(a), std::sin(a), 0, -std::sin(a), std::cos(a), 0, 0, 0, 1); };
+	double const d = kPi / 180.0;
+	glm::dmat3 const toScene = rx(30.0 * d) * ry(50.0 * d) * rz(20.0 * d);
+
+	for (glm::dvec3 const local : {glm::dvec3(1500.0, 700.0, 100.0), glm::dvec3(-800.0, 1200.0, -150.0), glm::dvec3(300.0, -400.0, 200.0), glm::dvec3(4000.0, 2500.0, 50.0)})
+	{
+		GalaxySample rotated;
+		GalaxySample reference;
+		Evaluate(prepared, galaxy.position + toScene * local, rotated);
+		EvaluateLocal(galaxy, local, reference);
+		CHECK(TotalDensity(reference) > 0.0);
+		CHECK(TotalDensity(rotated) == doctest::Approx(TotalDensity(reference)));
+	}
+}
+
+TEST_CASE("Two disks that split by arm population fill six parts")
+{
+	Galaxy galaxy;
+	Arms const arms{.count = 2, .pitchDeg = 15.0, .width = 300.0, .contrast = 3.0, .clumping = 0.0, .phaseDeg = 0.0, .r0 = 1000.0};
+	galaxy.disk = {.enabled = true, .density = 1.0, .scaleLength = 3000.0, .scaleHeight = 300.0, .cutoff = 30000.0, .arms = arms,
+		.population = 1, .armPopulation = 0, .armYoungFraction = 0.1};
+	galaxy.thickDisk = {.enabled = true, .density = 0.1, .scaleLength = 3600.0, .scaleHeight = 900.0, .cutoff = 30000.0, .arms = arms,
+		.population = 1, .armPopulation = 0, .armYoungFraction = 0.1};
+	galaxy.bulge = {.enabled = true, .density = 1000.0, .scale = 500.0, .axisY = 1.0, .axisZ = 1.0, .barAngleDeg = 0.0, .cutoff = 30000.0, .population = 2};
+	galaxy.halo = {.enabled = true, .density = 0.1, .scale = 1000.0, .cutoff = 30000.0, .population = 3};
+	double const radius = 5000.0;
+	double const onArm = std::log(radius / 1000.0) / std::tan(15.0 * kPi / 180.0);
+	GalaxySample sample;
+	EvaluateLocal(galaxy, {radius * std::cos(onArm), radius * std::sin(onArm), 0.0}, sample);
+	CHECK(sample.count == 6);
 }
 
 TEST_CASE("Dust is a uniform field when its scales are huge")

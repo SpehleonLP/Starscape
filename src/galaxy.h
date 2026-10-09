@@ -1,5 +1,4 @@
 #pragma once
-#include "population.h"
 #include <array>
 #include <cstdint>
 #include <string>
@@ -88,10 +87,10 @@ struct Contribution
 	int    population = -1;
 };
 
-// Thin disk (old + young), thick disk, bulge, halo: at most five parts per galaxy.
+// At most six parts: each disk splits into base + arm population, plus bulge and halo.
 struct GalaxySample
 {
-	std::array<Contribution, 5> parts{};
+	std::array<Contribution, 6> parts{};
 	int                         count      = 0;
 	double                      extinction = 0.0;   // α_V, magnitudes per parsec
 };
