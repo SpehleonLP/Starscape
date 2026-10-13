@@ -48,7 +48,7 @@ because gas and dust are one medium, and it shares the dust's bubble cavity.
 
 ### Model
 
-For a disk with an `arm_population`, at galaxy-frame point x:
+For a thin disk with an `arm_population`, at galaxy-frame point x:
 
     j_gas(x) = glow · L̄ · n_young(x) · G(x) / ⟨G⟩ · B(x) · c(x) · 100 · 10^(−1.932)
 
@@ -103,11 +103,13 @@ Thick disks and other components without an arm population carry no gas.
   core_colour = [0.25, 1.0, 0.85]    # dense clumps; normalised to Y = 1
 ```
 
-- The keys are under each disk table (`disk`, `thick_disk`), like `arms`.
+- The keys are under the thin disk's table (`[galaxy.disk.gas]`), like `arms`. The thick disk has no young
+  population to light gas, so a `gas` table there is an unknown key.
 - `glow` ranges over [0, 1000].
 - Colour components must be ≥ 0, with Y > 0.
 - `glow` > 0 on a disk without `arm_population` is an error, as
   `arm_young_fraction` already is.
+- `glow` = 0 (every preset) makes the term exactly zero, so existing skies are unchanged.
 
 ## 2. Star colour saturation
 
@@ -122,8 +124,9 @@ star_saturation = 1.0    # 1: physical; >1 pushes colours away from white
 
   Chromaticities have Y = 1, so white is (1, 1, 1).
 - Points and diffuse light both use the tables, so both change together.
-- Each bin keeps its luminance, so star counts, F_res, the point/diffuse split
-  and every flux test are unchanged.
+- Each bin keeps its luminance and the resolution split reads only luminance and T_V, so star counts,
+  F_res and the point budgets are unchanged. Luminance is exactly unchanged only where the transmittance
+  is grey: dust dims blue more than red, so a bluer star loses a little more light behind dust.
 - Range [0, 4]. 0 gives grey stars, which is harmless.
 - `[style]` is a new top-level table for scene-wide stylisation, so that later
   knobs have a home.
@@ -147,10 +150,9 @@ star_saturation = 1.0    # 1: physical; >1 pushes colours away from white
   | `[galaxy.disk.gas] glow` | re-tuned (see below) |
   | `[style] star_saturation` | 1.5 |
 
-  The prototype ran at gas gain 2.5, but it did not divide by ⟨G⟩. The plan's
-  tuning step therefore measures the prototype's ⟨G⟩ and sets `glow` to
-  2.5 · ⟨G⟩_prototype, which reproduces the target's brightness. It then renders
-  the scene beside the target for the owner.
+  The prototype ran at gas gain 2.5 without dividing by ⟨G⟩. Its ⟨G⟩ at
+  `filament` 3.5 and seed 1 measures 0.6045, so `glow = 1.5` reproduces the
+  target's brightness. The plan renders the scene beside the target for the owner.
 
 ## 4. Deleting the prototype
 
@@ -173,16 +175,15 @@ listed mutation, recorded in the test's comment.
 
 | Test | Assertion | Mutation that must fail it |
 |---|---|---|
-| Gas off is a no-op | Quick cook of a small Milky Way scene with no `gas` table and with `glow = 0`: identical files apart from the header's scene hash (a hash of the scene text) | add the gas term unconditionally |
-| Gas calibration | Milky Way disk with no bubble, 10⁵ R3-walk points in the midplane: mean gas luminance / mean young-star diffuse luminance = `glow` within 3% | skip the ⟨G⟩ division |
+| Gas calibration | Uniform young disk, dust filaments at `filament` 2 (⟨G⟩ = 0.88), 2 × 10⁵ random points: Σ gas luminance / Σ young-star diffuse luminance = `glow` within 3% | skip the ⟨G⟩ division |
 | Gas cavity | Points inside 70% of the bubble's semi-axes, with young stars present: gas emissivity exactly 0 | leave the cavity factor off the gas |
-| Gas colour | At a point with D < 1, the gas emissivity's chromaticity equals normalised `colour` to 10⁻⁹; at D > 3 it equals `core_colour` | drop the Y normalisation of either colour |
+| Gas colour | Prepared colours have Y = 1 and keep their direction; with pure red and pure blue colours, samples that are purely `colour` (D < 1, ~73%) outnumber those purely `core_colour` (D > 3, ~6.5%) by more than 5× and both occur | swap the mix's endpoints |
 | Gas attenuation | Gas region behind a dust slab of optical depth τ: per-channel gas radiance ratio with/without the slab = exp(−k_c τ) within 0.5% | add gas without the step's transmittance |
-| Gas leaves the stars alone | A cook with `glow` > 0: identical F_res, star count and star records to `glow = 0` | let gas reach the flux histogram |
-| Saturation identity | `star_saturation = 1` and absent: identical files apart from the scene hash | apply the formula with an off-by-one (s − 1) |
-| Saturation keeps luminance | s = 1.5: every bin's chroma has Y = 1 to 10⁻¹²; for in-gamut bins, distance from white is 1.5× the physical; one Milky Way ray's luminance radiance equals s = 1 to 10⁻¹² | skip the renormalisation |
+| Gas leaves the stars alone | One Milky Way ray with `glow` 1.5 vs 0: radiance rises, while point budgets, resolved radiance and the flux histogram are identical | add the gas to `resolvedRadiance` instead of `radiance` |
+| Saturation default | An absent `[style]` gives `star_saturation` 1, the physical sky | a default other than 1 |
+| Saturation keeps luminance | s = 4 (so some bins clip at zero): every bin's chroma has Y = 1 to 10⁻¹²; unclipped bins sit 4× as far from white; a dust-free Milky Way ray keeps its luminance to 10⁻¹² and its point budgets exactly, while its channels spread apart | skip the renormalisation |
 | Scene keys | Range and type errors for `glow`, `colour`, `core_colour` and `star_saturation`; `glow` > 0 without `arm_population` names the key | delete any one validation |
-| Example scenes | Both files under `scenes/` load without error (no test reads them today, so a typo there would ship) | — |
+| Example scenes | The CLI draft-cooks both files under `scenes/` (the Earth scene already has `cli-draft`; the stylized one gets its own) | — |
 
 **Visual acceptance:** the stylized scene's preview beside the target image, for
 the owner to judge. This is not a gate, so the test log prints an
