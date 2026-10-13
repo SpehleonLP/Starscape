@@ -48,7 +48,8 @@ include `include/kre_starscape.h` and read the file themselves.
 - The engine-side reader, shaders and removal of `Starscape.glb` (next spec).
 - Block compression of the diffuse layer (BC6H). The format reserves an encoding
   value for it.
-- Emission nebulae (HII regions), runtime grain, animated or time-varying skies.
+- Placed or near nebulae: a 40° nebula looked right in a still frame but dominated the
+  sky in a 3D viewer. Runtime grain, animated or time-varying skies.
 - A GPU implementation. The CPU cook is the reference.
 
 ## 1. Galaxy model
@@ -167,6 +168,58 @@ Extinction is per channel. The optical depth of channel c along a path is
 with k = (0.75, 1.00, 1.32) for linear Rec.709 R, G, B (approximating a Cardelli
 R_V = 3.1 curve at 610, 550 and 465 nm). The transmittance is T_c = exp(−τ_c);
 T_V uses k = 1.
+
+### Gas
+
+Gas lit by young stars glows where they cluster. It is how the sky gets nebulae
+without nebula objects: placed spheres with their own shaders read as pasted on
+top of the band, while gas driven by the galaxy's own young-star and dust fields
+reads as part of it. It shares the dust's filaments, because gas and dust are one
+medium, and the dust's bubble cavity.
+
+For a thin disk with an `arm_population`, at galaxy-frame point x:
+
+    j_gas(x) = glow · L̄ · n_young(x) · G(x) / ⟨G⟩ · B(x) · c(x) · 100 · 10^(−1.932)
+
+- **n_young** is the young stars' density exactly as the disk already computes
+  it: midplane × young share × association field × sech²(z / 2h_young).
+- **L̄ = Σ f_i L_i** is the arm population's mean V luminosity per star. So
+  `glow` is the gas's light as a multiple of the young stars' own diffuse light,
+  averaged over space before the cavity.
+- **G** is the gas texture:
+
+      G = (0.6 · D + W) · sqrt(F / ⟨F⟩)
+      D = LN(1.2, fbm(x / 40 pc, 5 octaves) / σ_fbm)        // soft clumps, mean one
+      W = 6 · max(0, ridged(x / 25 pc, 5 octaves))⁶          // thin bright wisps
+
+  F is the dust filament field at the dust's own wavelength and seed, so gas
+  knots sit in the dust's filaments. If the galaxy has no dust, F/⟨F⟩ = 1. The
+  noise uses `galaxy.seed` with its own salts.
+- **⟨G⟩** is G's spatial mean, measured in `PrepareGalaxy` with the same 2¹⁸-point
+  `SpatialMean` walk as the dust's ⟨LN⟩, and only when `glow` > 0. This keeps
+  `glow` meaning the same thing at any texture setting.
+- **B** is the dust bubble's cavity factor (zero within 70% of its semi-axes,
+  smoothstep to one at the edge), and one without a bubble.
+- **c** is the colour: mix(ĉ, ĉ_core, smoothstep(1, 3, D)). ĉ and ĉ_core are the
+  scene's `colour` and `core_colour`, each normalised to Rec.709 Y = 1, so the
+  colour never changes the light's amount. Dense clumps turn teal.
+
+The emissivity is in the same units as a star bin's j_i (Normalisation, below).
+
+In the march: `EvaluateLocal` returns the summed gas emissivity of a point as an RGB value on
+`GalaxySample`. L̄ reaches the galaxy as a derived field that `PrepareScene` fills
+from the population tables, so the galaxy code needs no population lookup.
+`Walk` sums it over galaxies onto the `Step`. `MarchRay` adds
+
+    radiance += weight · gas · T · ds
+
+The gas is diffuse light only:
+
+- the flux histogram, the threshold F_res and the star draws ignore it;
+- the cook's diffuse-flux statistic includes it;
+- `valueScale` already adapts to the brightest stored value.
+
+Thick disks and other components without an arm population carry no gas.
 
 ### Stellar populations
 
@@ -399,9 +452,12 @@ preview      = { width = 8192, march = false }
 
 [observer]
 position      = [8200.0, 0.0, 20.0]   # parsecs, scene frame
-spin_axis     = [0.0, -0.46, 0.89]    # sky-frame +z, scene frame
-zero_meridian = [1.0, 0.0, 0.0]       # sky-frame +x after orthogonalisation
+spin_axis     = [0.0, 0.0, 1.0]       # sky-frame +z, scene frame
+zero_meridian = [-1.0, 0.0, 0.0]      # sky-frame +x after orthogonalisation
 s_min         = 0.05
+
+[style]
+star_saturation = 1.0                 # 1: physical; >1 pushes star colours away from white
 
 [[galaxy]]
 preset   = "milky-way"
@@ -413,6 +469,11 @@ seed     = 1
   scale_length = 2600.0
   scale_height = 300.0
   arms = { count = 4, pitch_deg = 12.0, width = 400.0, contrast = 1.5, clumping = 1.0 }
+
+  [galaxy.disk.gas]
+  glow        = 0.0                   # off in every preset
+  colour      = [1.0, 0.18, 0.32]     # hydrogen red; normalised to Y = 1
+  core_colour = [0.25, 1.0, 0.85]     # the densest clumps; normalised to Y = 1
 
   [galaxy.dust]
   scale_height = 100.0
@@ -433,6 +494,20 @@ position = [780000.0, 120000.0, -40000.0]
 - Diffuse range: RGB9E5 holds full 9-bit relative precision over ~32 stops
   (1.5 × 10⁻⁵ to 65408); `valueScale` is the power of two that puts the sky's
   brightest stored value in (16384, 32768], giving the dark end every other stop.
+- The example scenes use the galactic frame (`spin_axis` the galactic pole, `zero_meridian`
+  toward the centre): the band runs along the preview's equator with the centre in the
+  middle, and a consumer orients the sky by rotating the skybox. Any frame still works.
+- `[galaxy.disk.gas]` belongs to the thin disk; the thick disk has no young population to
+  light gas, so a `gas` table there is an unknown key. `glow` is in [0, 1000]; colours need
+  components ≥ 0 and Y > 0; `glow` > 0 without `arm_population` is an error. `glow` = 0 makes
+  the term exactly zero, so the realistic presets are unchanged.
+- `[style]` holds scene-wide stylisation. `star_saturation` (in [0, 4], default 1) applies in
+  `Tabulate` to every bin's chromaticity: ĉ' = max(0, 1 + s · (ĉ − 1)), renormalised to Y = 1.
+  Each bin keeps its luminance and the resolution split reads only luminance and T_V, so star
+  counts, F_res and the point budgets do not move. Luminance is exactly kept only behind grey
+  transmittance: dust dims blue more than red, so a bluer star loses a little more behind dust.
+  `scenes/stylized-milky-way.toml` sets it to 1.5 with gas glow 1.5, dust contrast 6, filament
+  3.5 and arm contrast 2.25; its owner-approved look is `docs/images/2026-10-13-stylized-target.png`.
 - Population presets: `young-disk`, `old-disk`, `bulge`, `halo`; components name
   theirs with `population = "..."`.
 - Unknown keys, wrong types, out-of-range values (negative scale lengths, pitch
@@ -480,6 +555,15 @@ recorded in the test's comment.
 | Format rejection | `Parse` rejects every truncation length, each offset/size pushed past EOF, overlapping regions, bad magic/version/encoding, mip count inconsistent with face size | delete any one validation check |
 | RGB9E5 | Encode/decode matches the Vulkan reference algorithm over a logarithmic sweep of 10⁶ values plus the edge cases (0, max, negative, NaN → 0) | wrong exponent bias |
 | Preview flux | One star of known flux at latitudes 0°, 60°, 85°: preview pixels summed × solid angle = flux within 0.5 % | omit the per-pixel solid angle |
+| Gas calibration | Uniform young disk, dust filaments at `filament` 2 (⟨G⟩ = 0.88), 2 × 10⁵ random points: Σ gas luminance / Σ young-star diffuse luminance = `glow` within 3% | skip the ⟨G⟩ division |
+| Gas cavity | Points inside 70% of the bubble's semi-axes, with young stars present: gas emissivity exactly 0 | leave the cavity factor off the gas |
+| Gas colour | Prepared colours have Y = 1 and keep their direction; with pure red and pure blue colours, samples that are purely `colour` (D < 1, ~73%) outnumber those purely `core_colour` (D > 3, ~6.5%) by more than 5× and both occur | swap the mix's endpoints |
+| Gas attenuation | Gas region behind a dust slab of optical depth τ: per-channel gas radiance ratio with/without the slab = exp(−k_c τ) within 0.5% | add gas without the step's transmittance |
+| Gas leaves the stars alone | One Milky Way ray with `glow` 1.5 vs 0: radiance rises, while point budgets, resolved radiance and the flux histogram are identical | add the gas to `resolvedRadiance` instead of `radiance` |
+| Saturation default | An absent `[style]` gives `star_saturation` 1, the physical sky | a default other than 1 |
+| Saturation keeps luminance | s = 4 (so some bins clip at zero): every bin's chroma has Y = 1 to 10⁻¹²; unclipped bins sit 4× as far from white; a dust-free Milky Way ray keeps its luminance to 10⁻¹² and its point budgets exactly, while its channels spread apart | skip the renormalisation |
+| Scene keys | Range and type errors for `glow`, `colour`, `core_colour` and `star_saturation`; `glow` > 0 without `arm_population` names the key | delete any one validation |
+| Example scenes | The CLI draft-cooks both files under `scenes/` (the Earth scene already has `cli-draft`; the stylized one gets its own) | — |
 
 ## 6. Repository layout
 
@@ -502,10 +586,12 @@ Starscape/
     writer.h/.cpp                # mips, file assembly, atomic rename
     preview.h/.cpp               # equirect render, splats, RGBE write
   scenes/milky-way-from-earth.toml
+  scenes/stylized-milky-way.toml # the fantastical look: gas glow, bolder dust, saturated stars
   third_party/                   # vendored single headers, versions in third_party/VERSIONS
     glm/  toml.hpp  doctest.h    # the Radiance .hdr writer is ~30 lines in preview.cpp
   tests/
   docs/spec.md
+  docs/images/                   # reference renders the owner approved
   README.md                      # usage, units, citations
   LICENSE                        # MIT
 ```

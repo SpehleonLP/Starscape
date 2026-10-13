@@ -33,10 +33,12 @@ Options: `--threads N` (cook, preview; output is byte-identical for any thread c
 ## Scene format
 
 A scene is TOML: `[output]` (face size, `target_stars` or `limiting_magnitude`, quality,
-preview), `[observer]` (position in parsecs, spin axis, zero meridian) and one or more
+preview), `[observer]` (position in parsecs, spin axis, zero meridian), an optional `[style]`
+(scene-wide stylisation such as `star_saturation`) and one or more
 `[[galaxy]]` tables starting from a preset (`milky-way`, `small-spiral`, `elliptical`,
 `dwarf`) with any field overridden. Unknown keys are errors. See
-[`scenes/milky-way-from-earth.toml`](scenes/milky-way-from-earth.toml) for an example and
+[`scenes/milky-way-from-earth.toml`](scenes/milky-way-from-earth.toml) for the realistic sky,
+[`scenes/stylized-milky-way.toml`](scenes/stylized-milky-way.toml) for a fantastical one, and
 [`docs/spec.md`](docs/spec.md) for the model, formulas and units. The spec describes the main keys; every
 accepted key, its range and its preset default is defined in [`src/scene.cpp`](src/scene.cpp), and
 [`scenes/`](scenes/) shows them in use.

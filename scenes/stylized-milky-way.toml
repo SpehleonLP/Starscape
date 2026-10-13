@@ -1,0 +1,38 @@
+# The Earth scene pushed toward a fantastical look that keeps the galaxy's structure: darker, more
+# filamentary dust, bolder arms, young-star gas glowing red with teal cores, and more vivid star colour.
+# Target: docs/images/2026-10-13-stylized-target.png. Galactic frame, as in milky-way-from-earth.toml.
+[output]
+face_size    = 256
+target_stars = 4000
+quality      = "final"
+preview      = { width = 8192, march = false }
+
+[observer]
+position      = [8200.0, 0.0, 20.0]
+spin_axis     = [0.0, 0.0, 1.0]
+zero_meridian = [-1.0, 0.0, 0.0]
+
+[style]
+star_saturation = 1.5
+
+[[galaxy]]
+preset = "milky-way"
+seed   = 1
+
+  [galaxy.disk.arms]
+  contrast = 2.25
+
+  # 1.5 reproduces the target: its prototype ran at 2.5 before the texture's mean (0.6045 here) was divided out.
+  [galaxy.disk.gas]
+  glow = 1.5
+
+  [galaxy.dust]
+  bubble   = { center = [8200.0, 0.0, 20.0], radius = 300.0, height = 800.0 }
+  contrast = 6.0
+  filament = 3.5
+
+[[galaxy]]
+preset   = "small-spiral"
+position = [780000.0, 120000.0, -40000.0]
+rotation = [77.0, 0.0, 35.0]
+seed     = 2

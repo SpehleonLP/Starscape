@@ -1,5 +1,6 @@
-# A Milky-Way-like galaxy seen from a Sun-like position: 8.2 kpc out, 20 pc above the plane,
-# with Earth's spin axis (celestial north) tilted ~62.6° from the galactic pole.
+# A Milky-Way-like galaxy seen from a Sun-like position: 8.2 kpc out, 20 pc above the plane.
+# The sky frame is galactic: the band runs along the equator and the galactic centre is at
+# longitude 0, the middle of the preview. A consumer orients the sky by rotating the skybox.
 [output]
 face_size    = 256
 target_stars = 4000
@@ -8,8 +9,8 @@ preview      = { width = 8192, march = false }
 
 [observer]
 position      = [8200.0, 0.0, 20.0]
-spin_axis     = [0.4838, -0.7471, 0.4560]
-zero_meridian = [0.0549, -0.4940, -0.8677]
+spin_axis     = [0.0, 0.0, 1.0]
+zero_meridian = [-1.0, 0.0, 0.0]
 
 [[galaxy]]
 preset = "milky-way"
