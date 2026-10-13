@@ -523,6 +523,18 @@ Expected<void> ReadObserver(TableReader& root, Observer& observer)
 	return reader.Finish();
 }
 
+Expected<void> ReadStyle(TableReader& root, Style& style)
+{
+	STARSCAPE_TRY_ASSIGN(table, root.Table("style"));
+	if (table == nullptr)
+	{
+		return {};
+	}
+	STARSCAPE_TRY_ASSIGN(reader, ChildReader(root, "style", *table));
+	STARSCAPE_TRY(reader.Number("star_saturation", style.starSaturation, 0.0, 4.0));
+	return reader.Finish();
+}
+
 }
 
 glm::dmat3 SkyToScene(Observer const& observer)
@@ -550,6 +562,7 @@ Expected<Scene> ParseScene(std::string_view text, std::string_view sourceName)
 	TableReader reader(root, sourceName, "");
 	STARSCAPE_TRY(ReadOutput(reader, scene.output));
 	STARSCAPE_TRY(ReadObserver(reader, scene.observer));
+	STARSCAPE_TRY(ReadStyle(reader, scene.style));
 	STARSCAPE_TRY_ASSIGN(galaxies, reader.Array("galaxy"));
 	if (galaxies == nullptr || galaxies->empty())
 	{

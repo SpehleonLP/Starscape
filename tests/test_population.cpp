@@ -3,6 +3,7 @@
 #include <doctest.h>
 #include <cmath>
 #include <numeric>
+#include <glm/geometric.hpp>
 
 using namespace starscape;
 
@@ -60,4 +61,35 @@ TEST_CASE("Populations are found by name")
 	std::vector<Population> const presets = PresetPopulations();
 	CHECK(FindPopulation(presets, "bulge") == 2);
 	CHECK_FALSE(FindPopulation(presets, "nebula").has_value());
+}
+
+TEST_CASE("Saturation pushes star colours from white and keeps their light")
+{
+	// Mutation: skipping the renormalisation in Saturate reddens the luminance check on the clipped bins.
+	double const s = 4.0;
+	int clipped = 0;
+	for (Population const& population : PresetPopulations())
+	{
+		PopulationTable const physical = Tabulate(population);
+		PopulationTable const vivid = Tabulate(population, s);
+		for (int bin = 0; bin < kBins; ++bin)
+		{
+			size_t const i = size_t(bin);
+			CHECK(Luminance(vivid.chroma[i]) == doctest::Approx(1.0).epsilon(1e-12));
+			glm::dvec3 const pushed = glm::dvec3(1.0) + s * (physical.chroma[i] - glm::dvec3(1.0));
+			if (pushed.x >= 0.0 && pushed.y >= 0.0 && pushed.z >= 0.0)
+			{
+				CHECK(glm::length(vivid.chroma[i] - glm::dvec3(1.0)) == doctest::Approx(s * glm::length(physical.chroma[i] - glm::dvec3(1.0))).epsilon(1e-9));
+			}
+			else
+			{
+				++clipped;
+				CHECK(vivid.chroma[i].x >= 0.0);
+				CHECK(vivid.chroma[i].y >= 0.0);
+				CHECK(vivid.chroma[i].z >= 0.0);
+			}
+			CHECK(Luminance(vivid.lightBelow[i + 1]) == doctest::Approx(Luminance(physical.lightBelow[i + 1])).epsilon(1e-12));
+		}
+	}
+	CHECK(clipped > 0);   // the renormalisation is exercised, not just the in-gamut identity
 }

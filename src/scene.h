@@ -38,10 +38,17 @@ struct Observer
 	double     sMin = 0.05;                   // parsecs; nearer stars belong to the observer's own system
 };
 
+// Scene-wide departures from the physical sky, for a stylised look.
+struct Style
+{
+	double starSaturation = 1.0;   // 1: physical star colours; above 1 pushes them away from white
+};
+
 struct Scene
 {
 	Output                  output;
 	Observer                observer;
+	Style                   style;
 	std::vector<Galaxy>     galaxies;
 	std::vector<Population> populations;   // presets first; tests may append their own
 	uint64_t                hash = 0;      // FNV-1a 64 of the scene text

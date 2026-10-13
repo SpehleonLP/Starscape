@@ -162,3 +162,14 @@ TEST_CASE("A dust bubble is read, and needs both semi-axes")
 	CHECK(ErrorOf(head + "bubble = { center = [8200.0, 0.0, 20.0], radius = 300.0 }\n").find("dust.bubble: needs a positive radius and height") != std::string::npos);
 	CHECK(ErrorOf(head + "bubble = { radius = 300.0, height = 800.0, size = 2.0 }\n").find("bubble.size") != std::string::npos);
 }
+
+TEST_CASE("Style is read and range-checked")
+{
+	// Mutation: a default star_saturation other than 1 reddens the first check.
+	std::string const scene = std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\n";
+	CHECK(ParseScene(scene, "test.toml")->style.starSaturation == 1.0);
+	CHECK(ParseScene(scene + "[style]\nstar_saturation = 1.5\n", "test.toml")->style.starSaturation == 1.5);
+	CHECK(ErrorOf(scene + "[style]\nstar_saturation = 5.0\n").find("style.star_saturation") != std::string::npos);
+	CHECK(ErrorOf(scene + "[style]\nstar_saturation = -1.0\n").find("must be in") != std::string::npos);
+	CHECK(ErrorOf(scene + "[style]\nsaturation = 1.5\n").find("unknown key") != std::string::npos);
+}

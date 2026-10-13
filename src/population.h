@@ -39,7 +39,8 @@ struct PopulationTable
 };
 
 glm::dvec3 BlackbodyChroma(double kelvin);
-PopulationTable Tabulate(Population const& population);
+// `saturation` scales each bin's colour away from white (1: physical); every bin keeps its luminance.
+PopulationTable Tabulate(Population const& population, double saturation = 1.0);
 std::optional<int> FindPopulation(std::span<Population const> populations, std::string_view name);
 
 }

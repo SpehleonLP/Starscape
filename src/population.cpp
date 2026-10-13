@@ -48,6 +48,19 @@ double Planck(double nm, double kelvin)
 	return 1.0 / (std::pow(metres, 5) * std::expm1(kSecondRadiation / (metres * kelvin)));
 }
 
+// Chroma has luminance 1, so white is (1, 1, 1) and Y(1 + s(c - 1)) = 1: inside the gamut the push keeps
+// each bin's light by construction. Clipping a negative channel to zero breaks that, so renormalise. The
+// clipped vector keeps a channel >= 1 (the one that was >= 1 before), so its luminance stays positive.
+glm::dvec3 Saturate(glm::dvec3 chroma, double saturation)
+{
+	if (saturation == 1.0)
+	{
+		return chroma;
+	}
+	glm::dvec3 const pushed = glm::max(glm::dvec3(1.0) + saturation * (chroma - glm::dvec3(1.0)), glm::dvec3(0.0));
+	return pushed / Luminance(pushed);
+}
+
 }
 
 glm::dvec3 BlackbodyChroma(double kelvin)
@@ -66,7 +79,7 @@ glm::dvec3 BlackbodyChroma(double kelvin)
 	return rgb / Luminance(rgb);
 }
 
-PopulationTable Tabulate(Population const& population)
+PopulationTable Tabulate(Population const& population, double saturation)
 {
 	PopulationTable table;
 	for (int bin = 0; bin < kBins; ++bin)
@@ -74,7 +87,7 @@ PopulationTable Tabulate(Population const& population)
 		size_t const i = size_t(bin);
 		table.fraction[i]   = population.fraction[i];
 		table.luminosity[i] = BinLuminosity(bin);
-		table.chroma[i]     = BlackbodyChroma(population.temperature[i]);
+		table.chroma[i]     = Saturate(BlackbodyChroma(population.temperature[i]), saturation);
 		table.lightBelow[i + 1] = table.lightBelow[i] + table.fraction[i] * table.luminosity[i] * table.chroma[i];
 	}
 	return table;

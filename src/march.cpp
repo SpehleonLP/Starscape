@@ -109,7 +109,7 @@ PreparedScene PrepareScene(Scene const& scene)
 	}
 	for (Population const& population : scene.populations)
 	{
-		prepared.populations.push_back(Tabulate(population));
+		prepared.populations.push_back(Tabulate(population, scene.style.starSaturation));
 	}
 	prepared.origin = scene.observer.position;
 	prepared.skyToScene = SkyToScene(scene.observer);

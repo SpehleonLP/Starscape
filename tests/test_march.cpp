@@ -1,8 +1,10 @@
 #include "march.h"
 #include "test_scenes.h"
 #include <doctest.h>
+#include <algorithm>
 #include <cmath>
 #include <vector>
+#include <glm/geometric.hpp>
 
 using namespace starscape;
 using namespace starscape::test;
@@ -224,4 +226,24 @@ TEST_CASE("SampleStar picks a resolved distance in proportion to the count")
 	REQUIRE(farthest.has_value());
 	CHECK(farthest->distance <= 100.0 * 1.06);
 	CHECK_FALSE(SampleStar(prepared, params, {0.0, 0.0, 1.0}, bin, HUGE_VAL, 0.5).has_value());
+}
+
+TEST_CASE("Star saturation moves colour, not light or counts")
+{
+	// Mutation: PrepareScene not passing starSaturation to Tabulate reddens the spread check.
+	Scene scene = MilkyWayScene({8200.0, 0.0, 20.0});
+	scene.galaxies[0].dust.enabled = false;   // grey transmittance: only then is luminance exactly kept
+	PreparedScene const physical = PrepareScene(scene);
+	scene.style.starSaturation = 4.0;
+	PreparedScene const vivid = PrepareScene(scene);
+	MarchParams const params = ParamsFor(Quality::Quick);
+	glm::dvec3 const dir = glm::normalize(glm::dvec3(-1.0, 0.1, 0.02));
+	RayResult a;
+	RayResult b;
+	MarchRay(physical, params, dir, 1e-4, 1.0, 1.0, a);
+	MarchRay(vivid, params, dir, 1e-4, 1.0, 1.0, b);
+	CHECK(Luminance(b.radiance) == doctest::Approx(Luminance(a.radiance)).epsilon(1e-12));
+	CHECK(b.budget == a.budget);
+	auto spread = [](glm::dvec3 c) { return (std::max({c.x, c.y, c.z}) - std::min({c.x, c.y, c.z})) / Luminance(c); };
+	CHECK(spread(b.radiance) > 2.0 * spread(a.radiance));
 }
