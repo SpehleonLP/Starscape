@@ -17,6 +17,7 @@ struct Step
 	double                        b;   // s + ds/2
 	glm::dvec3                    transmittance;
 	std::span<Contribution const> parts;
+	glm::dvec3                    gas;   // glowing gas: radiance per parsec at the midpoint, before transmittance
 };
 
 // Steps every interval at its midpoints, handing each step's contributions and the
@@ -39,6 +40,7 @@ double Walk(PreparedScene const& scene, MarchParams const& params, glm::dvec3 di
 			glm::dvec3 const position = scene.origin + mid * dir;
 			parts.clear();
 			double extinction = 0.0;
+			glm::dvec3 gas(0.0);
 			for (PreparedGalaxy const& galaxy : scene.galaxies)
 			{
 				glm::dvec3 const offset = position - galaxy.position;
@@ -50,8 +52,9 @@ double Walk(PreparedScene const& scene, MarchParams const& params, glm::dvec3 di
 				Evaluate(galaxy, position, sample);
 				parts.insert(parts.end(), sample.parts.begin(), sample.parts.begin() + sample.count);
 				extinction += sample.extinction;
+				gas += sample.gas;
 			}
-			visit(Step{mid, ds, s, s + ds, TransmittanceForDepth(depth + 0.5 * extinction * ds), parts});
+			visit(Step{mid, ds, s, s + ds, TransmittanceForDepth(depth + 0.5 * extinction * ds), parts, gas});
 			depth += extinction * ds;
 			s = ds == remaining ? interval.end : s + ds;
 		}
@@ -103,13 +106,20 @@ MarchParams ParamsFor(Quality quality)
 PreparedScene PrepareScene(Scene const& scene)
 {
 	PreparedScene prepared;
-	for (Galaxy const& galaxy : scene.galaxies)
-	{
-		prepared.galaxies.push_back(PrepareGalaxy(galaxy));
-	}
 	for (Population const& population : scene.populations)
 	{
 		prepared.populations.push_back(Tabulate(population, scene.style.starSaturation));
+	}
+	for (Galaxy const& galaxy : scene.galaxies)
+	{
+		PreparedGalaxy ready = PrepareGalaxy(galaxy);
+		Disk& disk = ready.galaxy.disk;
+		if (disk.armPopulation >= 0)
+		{
+			// Gas glows at a multiple of its young stars' light, and only their table knows how bright they are.
+			disk.gas.youngLight = Luminance(prepared.populations[size_t(disk.armPopulation)].lightBelow[kBins]);
+		}
+		prepared.galaxies.push_back(std::move(ready));
 	}
 	prepared.origin = scene.observer.position;
 	prepared.skyToScene = SkyToScene(scene.observer);
@@ -173,6 +183,8 @@ void MarchRay(PreparedScene const& scene, MarchParams const& params, glm::dvec3 
 {
 	Walk(scene, params, scene.skyToScene * dirSky, HUGE_VAL, [&](Step const& step)
 	{
+		// Gas is diffuse light only: it has no stars to resolve, so it never touches the budget or the threshold.
+		out.radiance += (weight * step.ds) * (step.transmittance * step.gas);
 		for (Contribution const& part : step.parts)
 		{
 			PopulationTable const& population = scene.populations[size_t(part.population)];

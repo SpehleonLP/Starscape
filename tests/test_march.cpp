@@ -247,3 +247,62 @@ TEST_CASE("Star saturation moves colour, not light or counts")
 	auto spread = [](glm::dvec3 c) { return (std::max({c.x, c.y, c.z}) - std::min({c.x, c.y, c.z})) / Luminance(c); };
 	CHECK(spread(b.radiance) > 2.0 * spread(a.radiance));
 }
+
+TEST_CASE("Gas glow is dimmed by the dust in front of it")
+{
+	// Mutation: adding the gas without the step's transmittance reddens this test.
+	Scene scene = BaseScene();
+	int const population = AddSingleBinPopulation(scene, 14);
+	Galaxy source;   // dust disabled: the gas's filament factor must be 1
+	source.position = {1.0e6, 0.0, 0.0};
+	source.disk = {.enabled = true, .density = 0.05, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 20000.0, .arms = {},
+		.population = population, .armPopulation = population, .youngFraction = 0.5};
+	scene.galaxies.push_back(source);
+	MarchParams const params = ParamsFor(Quality::Quick);
+	glm::dvec3 const dir(1.0, 0.0, 0.0);
+	// The gas's own radiance: the same ray with and without glow, so the starlight cancels exactly.
+	auto gasRadiance = [&](Scene const& base)
+	{
+		RayResult dark;
+		MarchRay(PrepareScene(base), params, dir, HUGE_VAL, 1.0, 1.0, dark);
+		Scene lit = base;
+		lit.galaxies[0].disk.gas.glow = 1.0;
+		RayResult glowing;
+		MarchRay(PrepareScene(lit), params, dir, HUGE_VAL, 1.0, 1.0, glowing);
+		return glowing.radiance - dark.radiance;
+	};
+	glm::dvec3 const clear = gasRadiance(scene);
+	REQUIRE(Luminance(clear) > 0.0);
+	double const alpha = 0.002;
+	double const radius = 1000.0;
+	scene.galaxies.push_back(UniformDust(alpha, radius));
+	glm::dvec3 const dimmed = gasRadiance(scene);
+	double const tau = alpha * (radius - scene.observer.sMin) / 1.0857;
+	CHECK(dimmed.x / clear.x == doctest::Approx(std::exp(-0.75 * tau)).epsilon(0.005).scale(0.0));
+	CHECK(dimmed.y / clear.y == doctest::Approx(std::exp(-1.00 * tau)).epsilon(0.005).scale(0.0));
+	CHECK(dimmed.z / clear.z == doctest::Approx(std::exp(-1.32 * tau)).epsilon(0.005).scale(0.0));
+}
+
+TEST_CASE("Gas adds diffuse light and leaves the stars alone")
+{
+	// Mutation: adding the gas to resolvedRadiance instead of radiance reddens this test.
+	Scene scene = MilkyWayScene({8200.0, 0.0, 20.0});
+	PreparedScene const plain = PrepareScene(scene);
+	scene.galaxies[0].disk.gas.glow = 1.5;
+	PreparedScene const glowing = PrepareScene(scene);
+	CHECK(glowing.galaxies[0].galaxy.disk.gas.youngLight == doctest::Approx(Luminance(glowing.populations[0].lightBelow[kBins])));
+	MarchParams const params = ParamsFor(Quality::Quick);
+	glm::dvec3 const dir = glm::normalize(glm::dvec3(-1.0, 0.1, 0.02));
+	RayResult a;
+	RayResult b;
+	MarchRay(plain, params, dir, 1e-4, 1.0, 1.0, a);
+	MarchRay(glowing, params, dir, 1e-4, 1.0, 1.0, b);
+	CHECK(Luminance(b.radiance) > 1.01 * Luminance(a.radiance));
+	CHECK(b.budget == a.budget);
+	CHECK(b.resolvedRadiance == a.resolvedRadiance);
+	FluxHistogram ha;
+	FluxHistogram hb;
+	HistogramRay(plain, params, dir, 1.0, ha);
+	HistogramRay(glowing, params, dir, 1.0, hb);
+	CHECK(ha.count == hb.count);
+}
