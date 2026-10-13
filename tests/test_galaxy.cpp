@@ -379,3 +379,24 @@ TEST_CASE("Without glow there is no gas")
 	EvaluateLocal(GasDisk(0.0), {300.0, -200.0, 100.0}, sample);
 	CHECK(sample.gas == glm::dvec3(0.0));
 }
+
+TEST_CASE("Disabled dust leaves the gas texture alone")
+{
+	// Mutation: dropping the dust.enabled guard in GasTexture lets a disabled dust's filaments shape the gas
+	// and its measured mean; the attenuation test cannot see that, since it compares ratios.
+	Galaxy const plain = GasDisk(1.0);
+	Galaxy ghost = GasDisk(1.0);
+	ghost.dust = {.enabled = false, .extinction = 0.002, .scaleLength = 1e12, .scaleHeight = 400.0, .cutoff = 1e9, .laneOffset = 0.0, .contrast = 1.0, .filament = 3.0};
+	PreparedGalaxy const a = PrepareGalaxy(plain);
+	PreparedGalaxy const b = PrepareGalaxy(ghost);
+	CHECK(b.galaxy.disk.gas.textureMean == a.galaxy.disk.gas.textureMean);
+	for (glm::dvec3 const p : {glm::dvec3(300.0, -200.0, 100.0), glm::dvec3(-4100.0, 900.0, -30.0), glm::dvec3(12.5, 7000.0, 260.0)})
+	{
+		GalaxySample sa;
+		GalaxySample sb;
+		Evaluate(a, p, sa);
+		Evaluate(b, p, sb);
+		CHECK(Luminance(sa.gas) > 0.0);
+		CHECK(sb.gas == sa.gas);
+	}
+}
