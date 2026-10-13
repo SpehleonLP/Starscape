@@ -173,3 +173,25 @@ TEST_CASE("Style is read and range-checked")
 	CHECK(ErrorOf(scene + "[style]\nstar_saturation = -1.0\n").find("must be in") != std::string::npos);
 	CHECK(ErrorOf(scene + "[style]\nsaturation = 1.5\n").find("unknown key") != std::string::npos);
 }
+
+TEST_CASE("Gas keys are read and checked")
+{
+	// Mutation: deleting the arm_population check in ReadDisk reddens the last check.
+	std::string const head = std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.disk.gas]\n";
+	Expected<Scene> const scene = ParseScene(head + "glow = 1.5\ncolour = [1.0, 0.2, 0.3]\ncore_colour = [0.2, 1.0, 0.8]\n", "test.toml");
+	REQUIRE(scene.has_value());
+	Gas const& gas = scene->galaxies[0].disk.gas;
+	CHECK(gas.glow == 1.5);
+	CHECK(gas.colour == glm::dvec3(1.0, 0.2, 0.3));
+	CHECK(gas.coreColour == glm::dvec3(0.2, 1.0, 0.8));
+	CHECK(ParseScene(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n", "test.toml")->galaxies[0].disk.gas.glow == 0.0);
+	CHECK(ErrorOf(head + "glow = -1.0\n").find("disk.gas.glow") != std::string::npos);
+	CHECK(ErrorOf(head + "glow = 1001.0\n").find("must be in") != std::string::npos);
+	CHECK(ErrorOf(head + "colour = [-0.1, 1.0, 1.0]\n").find("disk.gas.colour") != std::string::npos);
+	CHECK(ErrorOf(head + "core_colour = [0.0, 0.0, 0.0]\n").find("positive luminance") != std::string::npos);
+	CHECK(ErrorOf(head + "colour = \"red\"\n").find("three numbers") != std::string::npos);
+	CHECK(ErrorOf(head + "glw = 1.0\n").find("gas.glw") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.thick_disk.gas]\nglow = 1.0\n").find("unknown key") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\n[galaxy.disk]\ndensity = 0.1\ncutoff = 5000\npopulation = \"old-disk\"\n[galaxy.disk.gas]\nglow = 1.0\n")
+		.find("arm_population") != std::string::npos);
+}

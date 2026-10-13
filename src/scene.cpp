@@ -263,6 +263,31 @@ Expected<void> ReadArms(TableReader& parent, Arms& arms)
 	return reader.Finish();
 }
 
+Expected<void> ReadColour(TableReader& reader, std::string_view key, glm::dvec3& colour)
+{
+	STARSCAPE_TRY(reader.Vector(key, colour));
+	// Normalisation divides by the luminance, so a black or negative colour must stop here.
+	if (colour.x < 0.0 || colour.y < 0.0 || colour.z < 0.0 || !(Luminance(colour) > 0.0))
+	{
+		return reader.Fail(key, "needs non-negative components and a positive luminance");
+	}
+	return {};
+}
+
+Expected<void> ReadGas(TableReader& parent, Gas& gas)
+{
+	STARSCAPE_TRY_ASSIGN(table, parent.Table("gas"));
+	if (table == nullptr)
+	{
+		return {};
+	}
+	STARSCAPE_TRY_ASSIGN(reader, ChildReader(parent, "gas", *table));
+	STARSCAPE_TRY(reader.Number("glow", gas.glow, 0.0, 1000.0));
+	STARSCAPE_TRY(ReadColour(reader, "colour", gas.colour));
+	STARSCAPE_TRY(ReadColour(reader, "core_colour", gas.coreColour));
+	return reader.Finish();
+}
+
 // A preset leaves unused components with no population and no cutoff; enabling one from a scene
 // must not let that reach the sampler as an out-of-range population index.
 Expected<void> CheckUsable(TableReader const& reader, std::string_view name, bool enabled, int population, double cutoff)
@@ -309,6 +334,11 @@ Expected<void> ReadDisk(TableReader& parent, std::string_view key, Disk& disk, s
 		if (disk.enabled && (disk.armYoungFraction > 0.0 || disk.youngFraction > 0.0) && disk.armPopulation < 0)
 		{
 			return reader.Fail("arm_young_fraction", "needs arm_population to be set");
+		}
+		STARSCAPE_TRY(ReadGas(reader, disk.gas));
+		if (disk.enabled && disk.gas.glow > 0.0 && disk.armPopulation < 0)
+		{
+			return reader.Fail("gas", "glow needs arm_population to be set: young stars light the gas");
 		}
 	}
 	STARSCAPE_TRY(CheckUsable(reader, key, disk.enabled, disk.population, disk.cutoff));

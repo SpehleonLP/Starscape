@@ -20,6 +20,17 @@ struct Arms
 	double r0        = 1000.0;
 };
 
+// Gas lit by a disk's young stars. Its light is `glow` times theirs, averaged over space: it gathers where
+// they cluster and onto the dust's filaments, and the dust's bubble clears it too.
+struct Gas
+{
+	double     glow = 0.0;
+	glm::dvec3 colour{1.0, 0.18, 0.32};      // hydrogen red; PrepareGalaxy normalises it to luminance 1
+	glm::dvec3 coreColour{0.25, 1.0, 0.85};  // the densest clumps; normalised likewise
+	double     textureMean = 1.0;            // derived by PrepareGalaxy: ⟨G⟩, divided out like Dust::filamentMean
+	double     youngLight  = 0.0;            // derived by PrepareScene: the arm population's mean L_V per star
+};
+
 // Field order matters: presets and tests use designated initialisers.
 struct Disk
 {
@@ -37,6 +48,7 @@ struct Disk
 	double associationSize  = 0.0;      // wavelength of the field gathering young stars into OB associations; 0: none
 	double associationClumping = 0.0;   // its log standard deviation
 	double associationMean  = 1.0;      // derived by PrepareGalaxy, divided out like Dust::filamentMean
+	Gas    gas{};                       // thin disks only; needs armPopulation. The {} keeps -Wextra quiet where designated initialisers omit it
 };
 
 // Hernquist profile n_b a / (r' (r' + a)³) over a radius r' stretched along a bar.
@@ -104,6 +116,7 @@ struct GalaxySample
 	std::array<Contribution, 6> parts{};
 	int                         count      = 0;
 	double                      extinction = 0.0;   // α_V, magnitudes per parsec
+	glm::dvec3                  gas{0.0};           // glowing gas: radiance per parsec, before transmittance
 };
 
 struct PreparedGalaxy

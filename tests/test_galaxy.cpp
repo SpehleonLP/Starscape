@@ -1,4 +1,5 @@
 #include "galaxy.h"
+#include "population.h"
 #include "presets.h"
 #include "rng.h"
 #include <doctest.h>
@@ -287,4 +288,94 @@ TEST_CASE("Galaxy presets resolve their populations")
 	CHECK(milkyWay->halo.population == 3);
 	CHECK(BoundRadius(*milkyWay) == 30000.0);
 	CHECK_FALSE(PresetGalaxy("andromeda", populations).has_value());
+}
+
+namespace
+{
+
+// A disk uniform over any test box, all young stars lighting gas; dust off unless a test turns it on.
+Galaxy GasDisk(double glow)
+{
+	Galaxy galaxy;
+	galaxy.disk = {.enabled = true, .density = 1.0, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 1e9, .arms = {}, .population = 1, .armPopulation = 0,
+		.youngFraction = 0.01};
+	galaxy.disk.gas.glow = glow;
+	galaxy.disk.gas.youngLight = 1.0;   // PrepareScene fills this from the population table
+	return galaxy;
+}
+
+}
+
+TEST_CASE("Gas glows at glow times the young stars' light, on average")
+{
+	// Mutation: dropping the division by textureMean leaves the ratio at ⟨G⟩ ≈ 0.88 of glow at filament 2.
+	Galaxy galaxy = GasDisk(2.0);
+	// Dust present only for its filaments; scale height 400 gives the Milky Way's 200 pc filament wavelength.
+	galaxy.dust = {.enabled = true, .extinction = 0.001, .scaleLength = 1e12, .scaleHeight = 400.0, .cutoff = 1e9, .laneOffset = 0.0, .contrast = 1.0, .filament = 2.0};
+	PreparedGalaxy const prepared = PrepareGalaxy(galaxy);
+	RandomStream rng(11, Purpose::Test, 0, 0, 0);
+	double gas = 0.0;
+	double young = 0.0;
+	int const count = 200000;
+	for (int i = 0; i < count; ++i)
+	{
+		glm::dvec3 const p(rng.NextDouble() * 1e6 - 5e5, rng.NextDouble() * 1e6 - 5e5, rng.NextDouble() * 1e6 - 5e5);
+		GalaxySample sample;
+		Evaluate(prepared, p, sample);
+		REQUIRE(sample.count == 2);
+		gas += Luminance(sample.gas);
+		young += sample.parts[1].density * 100.0 * kFluxAt10pc;
+	}
+	CHECK(gas / young == doctest::Approx(2.0).epsilon(0.03));
+}
+
+TEST_CASE("Gas shares the dust's bubble")
+{
+	// Mutation: leaving the bubble factor off the gas lights the cavity.
+	Galaxy galaxy = GasDisk(1.0);
+	galaxy.dust = {.enabled = true, .extinction = 0.002, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 1e9, .laneOffset = 0.0, .contrast = 1.0, .filament = 0.0,
+		.bubbleCenter = {100.0, 0.0, 0.0}, .bubbleRadius = 300.0, .bubbleHeight = 800.0};
+	PreparedGalaxy const prepared = PrepareGalaxy(galaxy);
+	GalaxySample inside;
+	Evaluate(prepared, {100.0, 0.0, 0.0}, inside);
+	REQUIRE(inside.count == 2);   // young stars are there to light it
+	CHECK(inside.gas == glm::dvec3(0.0));
+	GalaxySample outside;
+	Evaluate(prepared, {100.0, 0.0, 900.0}, outside);
+	CHECK(Luminance(outside.gas) > 0.0);
+}
+
+TEST_CASE("Gas colours are normalised and the densest clumps take the core colour")
+{
+	// Mutation: swapping the mix's endpoints makes pure-core samples the majority and reddens the ratio check.
+	Galaxy galaxy = GasDisk(1.0);
+	galaxy.disk.gas.colour = {2.0, 0.0, 0.0};
+	galaxy.disk.gas.coreColour = {0.0, 0.0, 3.0};
+	PreparedGalaxy const prepared = PrepareGalaxy(galaxy);
+	CHECK(Luminance(prepared.galaxy.disk.gas.colour) == doctest::Approx(1.0));
+	CHECK(Luminance(prepared.galaxy.disk.gas.coreColour) == doctest::Approx(1.0));
+	CHECK(prepared.galaxy.disk.gas.colour.y == 0.0);
+	CHECK(prepared.galaxy.disk.gas.coreColour.x == 0.0);
+	RandomStream rng(13, Purpose::Test, 0, 0, 0);
+	int red = 0;
+	int blue = 0;
+	for (int i = 0; i < 20000; ++i)
+	{
+		glm::dvec3 const p(rng.NextDouble() * 1e6 - 5e5, rng.NextDouble() * 1e6 - 5e5, rng.NextDouble() * 1e6 - 5e5);
+		GalaxySample sample;
+		Evaluate(prepared, p, sample);
+		REQUIRE(sample.gas.y == 0.0);
+		red += sample.gas.x > 0.0 && sample.gas.z == 0.0 ? 1 : 0;
+		blue += sample.gas.z > 0.0 && sample.gas.x == 0.0 ? 1 : 0;
+	}
+	// Clumps are LN(1.2): below 1 for ~73% of points, above 3 for ~6.5%.
+	CHECK(blue > 0);
+	CHECK(red > 5 * blue);
+}
+
+TEST_CASE("Without glow there is no gas")
+{
+	GalaxySample sample;
+	EvaluateLocal(GasDisk(0.0), {300.0, -200.0, 100.0}, sample);
+	CHECK(sample.gas == glm::dvec3(0.0));
 }

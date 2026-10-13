@@ -1,5 +1,6 @@
 #include "galaxy.h"
 #include "noise.h"
+#include "population.h"
 #include <algorithm>
 #include <cmath>
 #include <glm/common.hpp>
@@ -23,6 +24,13 @@ constexpr double kRidgedSigma = 0.1339;
 constexpr int kDustOctaves = 6;
 constexpr int kAssociationOctaves = 3;
 constexpr uint64_t kAssociationNoiseSalt = 0xA550C1A7E5ull;
+
+// The gas texture's noise. Fixed rather than scene keys: the owner-approved look was tuned on exactly these.
+constexpr uint64_t kGasClumpSalt = 0x6A5ull;
+constexpr uint64_t kGasWispSalt = 0x6A6ull;
+constexpr double kGasClumpWavelength = 40.0;   // parsecs: a bright nebula's core
+constexpr double kGasWispWavelength = 25.0;
+constexpr int kGasOctaves = 5;
 
 // A log-normal field whose logarithm has standard deviation `sigma`, given z of unit variance. Holding
 // the mean near one lets structure move stars and dust around without changing how much there is,
@@ -78,6 +86,64 @@ double AssociationMean(Disk const& disk, uint64_t seed)
 		return 1.0;
 	}
 	return SpatialMean([&](glm::dvec3 p) { return AssociationField(disk, p, seed); });
+}
+
+double DustWavelength(Galaxy const& galaxy)
+{
+	return 0.5 * (galaxy.disk.arms.count > 0 ? galaxy.disk.arms.width : galaxy.dust.scaleHeight);
+}
+
+// Log-normal like the clumps: dust is filaments with clear holes between them, not a modulated sheet.
+// Mean one over space: the dust's filaments with the extinction's normalisation.
+double DustFilaments(Galaxy const& galaxy, glm::dvec3 p)
+{
+	return DustField(galaxy.dust, p / DustWavelength(galaxy), galaxy.seed) / galaxy.dust.filamentMean;
+}
+
+// Empty within 70% of the bubble's semi-axes, ramping smoothly to one at its edge; one without a bubble.
+// Without the cavity, filaments within a few hundred parsecs of an observer in the plane blot the high
+// latitudes, where the real sky's are faint cirrus.
+double BubbleFactor(Dust const& dust, glm::dvec3 p)
+{
+	if (dust.bubbleRadius <= 0.0)
+	{
+		return 1.0;
+	}
+	glm::dvec3 const d = p - dust.bubbleCenter;
+	double const q = std::sqrt((d.x * d.x + d.y * d.y) / (dust.bubbleRadius * dust.bubbleRadius) + d.z * d.z / (dust.bubbleHeight * dust.bubbleHeight));
+	double const t = std::clamp((q - 0.7) / 0.3, 0.0, 1.0);
+	return t * t * (3.0 - 2.0 * t);
+}
+
+// Mean one: the soft clumps that also pick the gas colour.
+double GasClumps(Galaxy const& galaxy, glm::dvec3 p)
+{
+	return LogNormal(1.2, Fbm(p / kGasClumpWavelength, kGasOctaves, galaxy.seed ^ kGasClumpSalt) / kFbmSigma);
+}
+
+// G before its mean is divided out: clumps plus thin bright wisps, gathered onto the dust's filaments
+// because gas and dust are one medium.
+double GasTexture(Galaxy const& galaxy, glm::dvec3 p, double clumps)
+{
+	double const wisps = 6.0 * std::pow(std::max(0.0, RidgedFbm(p / kGasWispWavelength, kGasOctaves, galaxy.seed ^ kGasWispSalt)), 6.0);
+	double const filaments = galaxy.dust.enabled ? DustFilaments(galaxy, p) : 1.0;
+	return (0.6 * clumps + wisps) * std::sqrt(filaments);
+}
+
+// Needs the dust's filamentMean already measured.
+double GasTextureMean(Galaxy const& galaxy, Disk const& disk)
+{
+	if (disk.gas.glow <= 0.0)
+	{
+		return 1.0;
+	}
+	return SpatialMean([&](glm::dvec3 p) { return GasTexture(galaxy, p, GasClumps(galaxy, p)); });
+}
+
+void NormaliseColours(Gas& gas)
+{
+	gas.colour /= Luminance(gas.colour);
+	gas.coreColour /= Luminance(gas.coreColour);
 }
 
 double Radians(double degrees)
@@ -165,6 +231,8 @@ PreparedGalaxy PrepareGalaxy(Galaxy const& galaxy)
 	prepared.galaxy.dust.filamentMean = DustFieldMean(galaxy.dust, galaxy.seed);
 	prepared.galaxy.disk.associationMean = AssociationMean(galaxy.disk, galaxy.seed);
 	prepared.galaxy.thickDisk.associationMean = AssociationMean(galaxy.thickDisk, galaxy.seed);
+	prepared.galaxy.disk.gas.textureMean = GasTextureMean(prepared.galaxy, prepared.galaxy.disk);
+	NormaliseColours(prepared.galaxy.disk.gas);
 	glm::dmat3 const toScene = RotationX(Radians(galaxy.rotationDeg.x)) * RotationY(Radians(galaxy.rotationDeg.y)) * RotationZ(Radians(galaxy.rotationDeg.z));
 	prepared.toLocal = glm::transpose(toScene);
 	prepared.position = galaxy.position;
@@ -176,6 +244,7 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 {
 	out.count = 0;
 	out.extinction = 0.0;
+	out.gas = glm::dvec3(0.0);
 	double const radius = std::hypot(p.x, p.y);
 	double const r = glm::length(p);
 	double const azimuth = std::atan2(p.y, p.x);
@@ -218,7 +287,18 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 		{
 			associations = AssociationField(disk, p / disk.associationSize, galaxy.seed) / disk.associationMean;
 		}
-		push(midplane * young * associations * Sech2(p.z / (2.0 * youngHeight)), disk.armPopulation);
+		double const youngDensity = midplane * young * associations * Sech2(p.z / (2.0 * youngHeight));
+		push(youngDensity, disk.armPopulation);
+		if (disk.gas.glow > 0.0 && youngDensity > 0.0)
+		{
+			double const clumps = GasClumps(galaxy, p);
+			double const texture = GasTexture(galaxy, p, clumps) / disk.gas.textureMean;
+			// Dense clumps turn from hydrogen red to the core colour; both have luminance 1, so the mix keeps the light.
+			double const t = std::clamp((clumps - 1.0) / 2.0, 0.0, 1.0);
+			glm::dvec3 const colour = glm::mix(disk.gas.colour, disk.gas.coreColour, t * t * (3.0 - 2.0 * t));
+			double const light = disk.gas.glow * disk.gas.youngLight * youngDensity * texture * BubbleFactor(galaxy.dust, p);
+			out.gas += (light * 100.0 * kFluxAt10pc) * colour;
+		}
 	};
 	addDisk(galaxy.disk);
 	addDisk(galaxy.thickDisk);
@@ -248,19 +328,9 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 		Arms const& arms = galaxy.disk.arms;
 		double const lane = ArmProximity(arms, radius, azimuth, dust.laneOffset * arms.width);
 		double const laneModulation = 1.0 + (dust.contrast - 1.0) * lane;
-		double const wavelength = 0.5 * (arms.count > 0 ? arms.width : dust.scaleHeight);
-		// Log-normal like the clumps: dust is filaments with clear holes between them, not a modulated sheet.
-		double const filaments = DustField(dust, p / wavelength, galaxy.seed) / dust.filamentMean;
-		out.extinction = dust.extinction * std::exp(-radius / dust.scaleLength) * Sech2(p.z / (2.0 * dust.scaleHeight)) * laneModulation * filaments;
-		if (dust.bubbleRadius > 0.0)
-		{
-			// Without the cavity, filaments within a few hundred parsecs of an observer in the plane
-			// blot the high latitudes, where the real sky's are faint cirrus.
-			glm::dvec3 const d = p - dust.bubbleCenter;
-			double const q = std::sqrt((d.x * d.x + d.y * d.y) / (dust.bubbleRadius * dust.bubbleRadius) + d.z * d.z / (dust.bubbleHeight * dust.bubbleHeight));
-			double const t = std::clamp((q - 0.7) / 0.3, 0.0, 1.0);
-			out.extinction *= t * t * (3.0 - 2.0 * t);
-		}
+		double const filaments = DustFilaments(galaxy, p);
+		out.extinction = dust.extinction * std::exp(-radius / dust.scaleLength) * Sech2(p.z / (2.0 * dust.scaleHeight)) * laneModulation * filaments
+			* BubbleFactor(dust, p);
 	}
 }
 
