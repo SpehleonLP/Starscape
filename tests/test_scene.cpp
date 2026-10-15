@@ -246,3 +246,18 @@ TEST_CASE("The bubble's rim is read and needs young stars")
 	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\n[galaxy.disk]\ndensity = 0.1\ncutoff = 5000\npopulation = \"old-disk\"\n[galaxy.dust]\nbubble = { center = [0.0, 0.0, 0.0], radius = 300.0, height = 800.0, rim = 1.0 }\n")
 		.find("rim needs the thin disk's arm_population") != std::string::npos);
 }
+
+TEST_CASE("Reflection keys are read and need young stars")
+{
+	// Mutation: deleting the arm_population check for reflection in ReadDust reddens the last check.
+	std::string const head = std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.dust]\n";
+	Expected<Scene> const scene = ParseScene(head + "reflection = 2.0\nreflection_colour = [0.4, 0.6, 1.0]\n", "test.toml");
+	REQUIRE(scene.has_value());
+	CHECK(scene->galaxies[0].dust.reflection == 2.0);
+	CHECK(scene->galaxies[0].dust.reflectionColour == glm::dvec3(0.4, 0.6, 1.0));
+	CHECK(ParseScene(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n", "test.toml")->galaxies[0].dust.reflection == 0.0);
+	CHECK(ErrorOf(head + "reflection = -1.0\n").find("dust.reflection") != std::string::npos);
+	CHECK(ErrorOf(head + "reflection_colour = [0.0, 0.0, 0.0]\n").find("positive luminance") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\n[galaxy.disk]\ndensity = 0.1\ncutoff = 5000\npopulation = \"old-disk\"\n[galaxy.dust]\nreflection = 1.0\n")
+		.find("reflection needs the thin disk's arm_population") != std::string::npos);
+}

@@ -675,3 +675,51 @@ TEST_CASE("Without dust there is no rim")
 		CHECK(RimLight(prepared, d * (0.85 / unit)) == 0.0);
 	}
 }
+
+namespace
+{
+
+// GasDisk under uniform dust that reflects; no other gas.
+Galaxy ReflectingDisk(double extinction)
+{
+	Galaxy galaxy = GasDisk(0.0);
+	galaxy.dust = {.enabled = true, .extinction = extinction, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 1e9, .laneOffset = 0.0, .contrast = 1.0, .filament = 0.0};
+	galaxy.dust.reflection = 2.0;
+	galaxy.dust.reflectionColour = {0.9, 1.24, 2.0};   // twice the default: normalisation must bring it to Y = 1
+	return galaxy;
+}
+
+}
+
+TEST_CASE("Reflection tracks the dust and the young stars")
+{
+	// Mutation: using the dust's filament field without α₀ (out.extinction / dust.extinction) breaks the doubling.
+	glm::dvec3 const p(300.0, -200.0, 100.0);
+	GalaxySample once;
+	GalaxySample twice;
+	Evaluate(PrepareGalaxy(ReflectingDisk(0.001)), p, once);
+	Evaluate(PrepareGalaxy(ReflectingDisk(0.002)), p, twice);
+	REQUIRE(Luminance(once.gas) > 0.0);
+	CHECK(Luminance(twice.gas) == doctest::Approx(2.0 * Luminance(once.gas)).epsilon(1e-12));
+	// The dust's own exp(-R/1e12) falloff (R ~ 360 pc) is a 4e-10 relative gap to the young density, hence 1e-8.
+	// At 1 mag/kpc the reflected light is `reflection` times the young stars' own.
+	CHECK(Luminance(once.gas) == doctest::Approx(2.0 * once.parts[1].density * 100.0 * kFluxAt10pc).epsilon(1e-8));
+	Galaxy dark = ReflectingDisk(0.001);
+	dark.dust.enabled = false;
+	GalaxySample none;
+	Evaluate(PrepareGalaxy(dark), p, none);
+	CHECK(none.gas == glm::dvec3(0.0));
+}
+
+TEST_CASE("Reflected light takes its normalised colour")
+{
+	// Mutation: skipping the reflection colour's normalisation doubles the luminance.
+	PreparedGalaxy const prepared = PrepareGalaxy(ReflectingDisk(0.001));
+	CHECK(Luminance(prepared.galaxy.dust.reflectionColour) == doctest::Approx(1.0).epsilon(1e-12));
+	GalaxySample sample;
+	Evaluate(prepared, {300.0, -200.0, 100.0}, sample);
+	glm::dvec3 const expected = prepared.galaxy.dust.reflectionColour * Luminance(sample.gas);
+	CHECK(sample.gas.x == doctest::Approx(expected.x).epsilon(1e-12));
+	CHECK(sample.gas.y == doctest::Approx(expected.y).epsilon(1e-12));
+	CHECK(sample.gas.z == doctest::Approx(expected.z).epsilon(1e-12));
+}

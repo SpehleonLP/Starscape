@@ -105,6 +105,10 @@ struct Dust
 	// Gas glowing on the bubble's wall, lit in patches: arcs across the sky from inside it. Its strength
 	// is a multiple of the young stars' light at the wall's radius; it needs the thin disk's arm population.
 	double bubbleRim = 0.0;
+	// Dust lit by nearby young stars scatters their light. `reflection` is that light as a multiple of the
+	// young stars' own where the dust runs at 1 mag/kpc. Added light, a stylisation: the stars lose nothing.
+	double     reflection = 0.0;
+	glm::dvec3 reflectionColour{0.45, 0.62, 1.0};   // PrepareGalaxy normalises it to luminance 1
 };
 
 struct Galaxy

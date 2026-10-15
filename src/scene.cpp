@@ -474,6 +474,12 @@ Expected<void> ReadDust(TableReader& parent, Dust& dust, Disk const& thin)
 	STARSCAPE_TRY(reader.Number("lane_offset", dust.laneOffset, -5.0, 5.0));
 	STARSCAPE_TRY(reader.Number("contrast", dust.contrast, 0.0, 1000.0));
 	STARSCAPE_TRY(reader.Number("filament", dust.filament, 0.0, 10.0));
+	STARSCAPE_TRY(reader.Number("reflection", dust.reflection, 0.0, 1000.0));
+	STARSCAPE_TRY(ReadColour(reader, "reflection_colour", dust.reflectionColour));
+	if (dust.enabled && dust.reflection > 0.0 && thin.armPopulation < 0)
+	{
+		return reader.Fail("reflection", "reflection needs the thin disk's arm_population: young stars light the dust");
+	}
 	STARSCAPE_TRY(ReadBubble(reader, dust, thin));
 	STARSCAPE_TRY(CheckUsable(reader, "dust", dust.enabled, 0, dust.cutoff));
 	return reader.Finish();

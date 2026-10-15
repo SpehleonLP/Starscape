@@ -319,6 +319,7 @@ PreparedGalaxy PrepareGalaxy(Galaxy const& galaxy)
 	prepared.galaxy.disk.gas.textureMean = GasTextureMean(prepared.galaxy, prepared.galaxy.disk);
 	prepared.galaxy.disk.gas.largeMean = LargeGasMean(prepared.galaxy.disk.gas, prepared.galaxy.seed);
 	NormaliseColours(prepared.galaxy.disk.gas);
+	prepared.galaxy.dust.reflectionColour /= Luminance(prepared.galaxy.dust.reflectionColour);
 	glm::dmat3 const toScene = RotationX(Radians(galaxy.rotationDeg.x)) * RotationY(Radians(galaxy.rotationDeg.y)) * RotationZ(Radians(galaxy.rotationDeg.z));
 	prepared.toLocal = glm::transpose(toScene);
 	prepared.position = galaxy.position;
@@ -343,11 +344,11 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 		}
 	};
 
-	auto addDisk = [&](Disk const& disk)
+	auto addDisk = [&](Disk const& disk) -> double
 	{
 		if (!disk.enabled || r > disk.cutoff)
 		{
-			return;
+			return 0.0;
 		}
 		double const crest = ArmProximity(disk.arms, radius, azimuth, 0.0);
 		double modulation = 1.0;
@@ -396,8 +397,10 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 				out.gas += (light * 100.0 * kFluxAt10pc) * base;
 			}
 		}
+		return youngDensity;
 	};
-	addDisk(galaxy.disk);
+	// The thin disk's young stars light the reflection below.
+	double const youngDensity = addDisk(galaxy.disk);
 	addDisk(galaxy.thickDisk);
 	if (r <= galaxy.disk.cutoff)
 	{
@@ -432,6 +435,12 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 		double const filaments = DustFilaments(galaxy, p);
 		out.extinction = dust.extinction * std::exp(-radius / dust.scaleLength) * Sech2(p.z / (2.0 * dust.scaleHeight)) * laneModulation * filaments
 			* BubbleFactor(dust, p);
+		if (dust.reflection > 0.0 && youngDensity > 0.0)
+		{
+			// α_V in magnitudes per kiloparsec, so `reflection` is a multiple of the young light at 1 mag/kpc.
+			double const light = dust.reflection * (out.extinction * 1000.0) * galaxy.disk.gas.youngLight * youngDensity;
+			out.gas += (light * 100.0 * kFluxAt10pc) * dust.reflectionColour;
+		}
 	}
 }
 
