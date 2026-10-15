@@ -218,3 +218,18 @@ TEST_CASE("A gas palette is read and checked")
 	CHECK(ErrorOf(head + "palette_wavelength = 5.0\n").find("disk.gas.palette_wavelength") != std::string::npos);
 	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.thick_disk.gas]\npalette = []\n").find("unknown key") != std::string::npos);
 }
+
+TEST_CASE("Large-scale gas keys are read and checked")
+{
+	// Mutation: deleting the arm_population check for large_glow in ReadDisk reddens the last check.
+	std::string const head = std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.disk.gas]\n";
+	Expected<Scene> const scene = ParseScene(head + "large_glow = 1.5\nlarge_wavelength = 120.0\n", "test.toml");
+	REQUIRE(scene.has_value());
+	CHECK(scene->galaxies[0].disk.gas.largeGlow == 1.5);
+	CHECK(scene->galaxies[0].disk.gas.largeWavelength == 120.0);
+	CHECK(ParseScene(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n", "test.toml")->galaxies[0].disk.gas.largeGlow == 0.0);
+	CHECK(ErrorOf(head + "large_glow = -1.0\n").find("disk.gas.large_glow") != std::string::npos);
+	CHECK(ErrorOf(head + "large_wavelength = 200000.0\n").find("must be in") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\n[galaxy.disk]\ndensity = 0.1\ncutoff = 5000\npopulation = \"old-disk\"\n[galaxy.disk.gas]\nlarge_glow = 1.0\n")
+		.find("large_glow needs arm_population") != std::string::npos);
+}

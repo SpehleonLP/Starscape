@@ -33,6 +33,8 @@ constexpr double kGasWispWavelength = 25.0;
 constexpr int kGasOctaves = 5;
 // The palette's hue field. Fixed rather than a scene key: the owner-approved nebula look was tuned on it.
 constexpr uint64_t kPaletteSalt = 0x9A1E77Eull;
+constexpr uint64_t kLargeGasSalt = 0xB16B16ull;
+constexpr int kLargeGasOctaves = 4;
 
 // A log-normal field whose logarithm has standard deviation `sigma`, given z of unit variance. Holding
 // the mean near one lets structure move stars and dust around without changing how much there is,
@@ -252,6 +254,22 @@ double BoundRadius(Galaxy const& galaxy)
 	return radius;
 }
 
+double LargeGasField(glm::dvec3 noiseSpace, uint64_t seed)
+{
+	return LogNormal(1.0, Fbm(noiseSpace, kLargeGasOctaves, seed ^ kLargeGasSalt) / kFbmSigma);
+}
+
+// Measured in noise space, so the mean holds at any wavelength: a box in parsecs would span a single
+// noise cell at the largest wavelengths and measure nothing.
+double LargeGasMean(Gas const& gas, uint64_t seed)
+{
+	if (gas.largeGlow <= 0.0)
+	{
+		return 1.0;
+	}
+	return SpatialMean([&](glm::dvec3 q) { return LargeGasField(q, seed); });
+}
+
 PreparedGalaxy PrepareGalaxy(Galaxy const& galaxy)
 {
 	PreparedGalaxy prepared;
@@ -260,6 +278,7 @@ PreparedGalaxy PrepareGalaxy(Galaxy const& galaxy)
 	prepared.galaxy.disk.associationMean = AssociationMean(galaxy.disk, galaxy.seed);
 	prepared.galaxy.thickDisk.associationMean = AssociationMean(galaxy.thickDisk, galaxy.seed);
 	prepared.galaxy.disk.gas.textureMean = GasTextureMean(prepared.galaxy, prepared.galaxy.disk);
+	prepared.galaxy.disk.gas.largeMean = LargeGasMean(prepared.galaxy.disk.gas, prepared.galaxy.seed);
 	NormaliseColours(prepared.galaxy.disk.gas);
 	glm::dmat3 const toScene = RotationX(Radians(galaxy.rotationDeg.x)) * RotationY(Radians(galaxy.rotationDeg.y)) * RotationZ(Radians(galaxy.rotationDeg.z));
 	prepared.toLocal = glm::transpose(toScene);
@@ -317,15 +336,26 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 		}
 		double const youngDensity = midplane * young * associations * Sech2(p.z / (2.0 * youngHeight));
 		push(youngDensity, disk.armPopulation);
-		if (disk.gas.glow > 0.0 && youngDensity > 0.0)
+		if (youngDensity > 0.0 && (disk.gas.glow > 0.0 || disk.gas.largeGlow > 0.0))
 		{
-			double const clumps = GasClumps(galaxy, p);
-			double const texture = GasTexture(galaxy, p, clumps) / disk.gas.textureMean;
-			// Dense clumps turn from hydrogen red to the core colour; both have luminance 1, so the mix keeps the light.
-			double const t = std::clamp((clumps - 1.0) / 2.0, 0.0, 1.0);
-			glm::dvec3 const colour = glm::mix(PaletteColour(galaxy, disk.gas, p), disk.gas.coreColour, t * t * (3.0 - 2.0 * t));
-			double const light = disk.gas.glow * disk.gas.youngLight * youngDensity * texture * BubbleFactor(galaxy.dust, p);
-			out.gas += (light * 100.0 * kFluxAt10pc) * colour;
+			glm::dvec3 const base = PaletteColour(galaxy, disk.gas, p);
+			double const bubble = BubbleFactor(galaxy.dust, p);
+			if (disk.gas.glow > 0.0)
+			{
+				double const clumps = GasClumps(galaxy, p);
+				double const texture = GasTexture(galaxy, p, clumps) / disk.gas.textureMean;
+				// Dense clumps turn from the base colour to the core colour; both have luminance 1, so the mix keeps the light.
+				double const t = std::clamp((clumps - 1.0) / 2.0, 0.0, 1.0);
+				glm::dvec3 const colour = glm::mix(base, disk.gas.coreColour, t * t * (3.0 - 2.0 * t));
+				double const light = disk.gas.glow * disk.gas.youngLight * youngDensity * texture * bubble;
+				out.gas += (light * 100.0 * kFluxAt10pc) * colour;
+			}
+			if (disk.gas.largeGlow > 0.0)
+			{
+				double const field = LargeGasField(p / disk.gas.largeWavelength, galaxy.seed) / disk.gas.largeMean;
+				double const light = disk.gas.largeGlow * disk.gas.youngLight * youngDensity * field * bubble;
+				out.gas += (light * 100.0 * kFluxAt10pc) * base;
+			}
 		}
 	};
 	addDisk(galaxy.disk);

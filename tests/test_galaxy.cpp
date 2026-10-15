@@ -500,3 +500,56 @@ TEST_CASE("The thick disk never takes the thin disk's palette")
 	CHECK(sample.count >= 2);
 	CHECK(sample.gas == glm::dvec3(0.0));
 }
+
+TEST_CASE("Large-scale gas glows at large_glow times the young stars' light, on average")
+{
+	// Mutation: lighting the term by the disk's whole midplane density instead of its young density puts
+	// the ratio at large_glow / young_fraction. The second wavelength spans few noise cells across the box,
+	// which only a mean measured in noise space keeps calibrated.
+	for (double const wavelength : {100.0, 20000.0})
+	{
+		Galaxy galaxy = GasDisk(0.0);
+		galaxy.disk.gas.largeGlow = 2.0;
+		galaxy.disk.gas.largeWavelength = wavelength;
+		PreparedGalaxy const prepared = PrepareGalaxy(galaxy);
+		RandomStream rng(19, Purpose::Test, 0, 0, 0);
+		double gas = 0.0;
+		double young = 0.0;
+		for (int i = 0; i < 200000; ++i)
+		{
+			glm::dvec3 const p(rng.NextDouble() * 1e8 - 5e7, rng.NextDouble() * 1e8 - 5e7, rng.NextDouble() * 1e8 - 5e7);
+			GalaxySample sample;
+			Evaluate(prepared, p, sample);
+			REQUIRE(sample.count == 2);
+			REQUIRE(std::isfinite(Luminance(sample.gas)));
+			gas += Luminance(sample.gas);
+			young += sample.parts[1].density * 100.0 * kFluxAt10pc;
+		}
+		CHECK(gas / young == doctest::Approx(2.0).epsilon(0.03));
+	}
+}
+
+TEST_CASE("The large-scale field's mean is measured in noise space and divided out")
+{
+	// Mutations: replacing LargeGasMean's walk with a constant 1 reddens the first three checks; dropping
+	// the division by largeMean in EvaluateLocal reddens the last. At σ 1 the mean is 1.007, too close to
+	// one for the calibration test's 3% to see, so the division is pinned directly.
+	Galaxy galaxy = GasDisk(0.0);
+	galaxy.disk.gas.largeGlow = 1.0;
+	PreparedGalaxy const a = PrepareGalaxy(galaxy);
+	CHECK(a.galaxy.disk.gas.largeMean == doctest::Approx(1.006899).epsilon(1e-5));   // measured at seed 1, 2^18 points
+	galaxy.seed = 2;
+	CHECK(PrepareGalaxy(galaxy).galaxy.disk.gas.largeMean != a.galaxy.disk.gas.largeMean);
+	galaxy.seed = 1;
+	galaxy.disk.gas.largeWavelength = 5000.0;
+	CHECK(PrepareGalaxy(galaxy).galaxy.disk.gas.largeMean == a.galaxy.disk.gas.largeMean);   // noise space: no wavelength
+	PreparedGalaxy doubled = a;
+	doubled.galaxy.disk.gas.largeMean *= 2.0;
+	glm::dvec3 const p(300.0, -200.0, 100.0);
+	GalaxySample once;
+	GalaxySample halved;
+	Evaluate(a, p, once);
+	Evaluate(doubled, p, halved);
+	REQUIRE(Luminance(once.gas) > 0.0);
+	CHECK(Luminance(halved.gas) == doctest::Approx(0.5 * Luminance(once.gas)).epsilon(1e-12));
+}

@@ -35,6 +35,11 @@ struct Gas
 	std::array<glm::dvec3, kMaxPalette> palette{};
 	int        paletteCount = 0;
 	double     paletteWavelength = 1500.0;   // parsecs
+	// A second gas band at the size of giant cloud complexes. `largeGlow` is its light as a multiple of the
+	// young stars' own, like `glow`.
+	double     largeGlow = 0.0;
+	double     largeWavelength = 100.0;  // parsecs
+	double     largeMean = 1.0;          // derived by PrepareGalaxy: the field's mean in noise space, divided out
 	double     textureMean = 1.0;            // derived by PrepareGalaxy: ⟨G⟩, divided out like Dust::filamentMean
 	double     youngLight  = 0.0;            // derived by PrepareScene: the arm population's mean L_V per star
 };

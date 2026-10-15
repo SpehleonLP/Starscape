@@ -328,6 +328,8 @@ Expected<void> ReadGas(TableReader& parent, Gas& gas)
 	STARSCAPE_TRY(ReadColour(reader, "core_colour", gas.coreColour));
 	STARSCAPE_TRY(ReadPalette(reader, gas));
 	STARSCAPE_TRY(reader.Number("palette_wavelength", gas.paletteWavelength, 10.0, 100000.0));
+	STARSCAPE_TRY(reader.Number("large_glow", gas.largeGlow, 0.0, 1000.0));
+	STARSCAPE_TRY(reader.Number("large_wavelength", gas.largeWavelength, 10.0, 100000.0));
 	return reader.Finish();
 }
 
@@ -382,6 +384,10 @@ Expected<void> ReadDisk(TableReader& parent, std::string_view key, Disk& disk, s
 		if (disk.enabled && disk.gas.glow > 0.0 && disk.armPopulation < 0)
 		{
 			return reader.Fail("gas", "glow needs arm_population to be set: young stars light the gas");
+		}
+		if (disk.enabled && disk.gas.largeGlow > 0.0 && disk.armPopulation < 0)
+		{
+			return reader.Fail("gas", "large_glow needs arm_population to be set: young stars light the gas");
 		}
 	}
 	STARSCAPE_TRY(CheckUsable(reader, key, disk.enabled, disk.population, disk.cutoff));
