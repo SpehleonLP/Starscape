@@ -31,6 +31,8 @@ constexpr uint64_t kGasWispSalt = 0x6A6ull;
 constexpr double kGasClumpWavelength = 40.0;   // parsecs: a bright nebula's core
 constexpr double kGasWispWavelength = 25.0;
 constexpr int kGasOctaves = 5;
+// The palette's hue field. Fixed rather than a scene key: the owner-approved nebula look was tuned on it.
+constexpr uint64_t kPaletteSalt = 0x9A1E77Eull;
 
 // A log-normal field whose logarithm has standard deviation `sigma`, given z of unit variance. Holding
 // the mean near one lets structure move stars and dust around without changing how much there is,
@@ -140,10 +142,36 @@ double GasTextureMean(Galaxy const& galaxy, Disk const& disk)
 	return SpatialMean([&](glm::dvec3 p) { return GasTexture(galaxy, p, GasClumps(galaxy, p)); });
 }
 
+// A one-σ change in the hue field moves about one palette entry, so a sky shows every entry without
+// flickering between them. Entries have luminance 1, so any blend of two does too.
+glm::dvec3 PaletteColour(Galaxy const& galaxy, Gas const& gas, glm::dvec3 p)
+{
+	if (gas.paletteCount == 0)
+	{
+		return gas.colour;
+	}
+	double const count = double(gas.paletteCount);
+	double const z = Fbm(p / gas.paletteWavelength, 3, galaxy.seed ^ kPaletteSalt) / kFbmSigma;
+	double u = std::fmod(0.9 * z, count);
+	if (u < 0.0)
+	{
+		u += count;
+	}
+	double const index = std::floor(u);
+	double f = u - index;
+	f = f * f * (3.0 - 2.0 * f);
+	int const i = int(index) % gas.paletteCount;
+	return glm::mix(gas.palette[size_t(i)], gas.palette[size_t((i + 1) % gas.paletteCount)], f);
+}
+
 void NormaliseColours(Gas& gas)
 {
 	gas.colour /= Luminance(gas.colour);
 	gas.coreColour /= Luminance(gas.coreColour);
+	for (int i = 0; i < gas.paletteCount; ++i)
+	{
+		gas.palette[size_t(i)] /= Luminance(gas.palette[size_t(i)]);
+	}
 }
 
 double Radians(double degrees)
@@ -295,7 +323,7 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 			double const texture = GasTexture(galaxy, p, clumps) / disk.gas.textureMean;
 			// Dense clumps turn from hydrogen red to the core colour; both have luminance 1, so the mix keeps the light.
 			double const t = std::clamp((clumps - 1.0) / 2.0, 0.0, 1.0);
-			glm::dvec3 const colour = glm::mix(disk.gas.colour, disk.gas.coreColour, t * t * (3.0 - 2.0 * t));
+			glm::dvec3 const colour = glm::mix(PaletteColour(galaxy, disk.gas, p), disk.gas.coreColour, t * t * (3.0 - 2.0 * t));
 			double const light = disk.gas.glow * disk.gas.youngLight * youngDensity * texture * BubbleFactor(galaxy.dust, p);
 			out.gas += (light * 100.0 * kFluxAt10pc) * colour;
 		}

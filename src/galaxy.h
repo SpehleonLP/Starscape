@@ -20,6 +20,9 @@ struct Arms
 	double r0        = 1000.0;
 };
 
+// The most colours a gas palette takes: enough for any ramp, small enough to live in a fixed array.
+inline constexpr int kMaxPalette = 8;
+
 // Gas lit by a disk's young stars. Its light is `glow` times theirs, averaged over space: it gathers where
 // they cluster and onto the dust's filaments, and the dust's bubble clears it too.
 struct Gas
@@ -27,6 +30,11 @@ struct Gas
 	double     glow = 0.0;
 	glm::dvec3 colour{1.0, 0.18, 0.32};      // hydrogen red; PrepareGalaxy normalises it to luminance 1
 	glm::dvec3 coreColour{0.25, 1.0, 0.85};  // the densest clumps; normalised likewise
+	// A cyclic ramp replacing `colour`, chosen by a field of `paletteWavelength`, so that neighbouring
+	// clouds differ in hue. Empty (count 0): `colour` alone. PrepareGalaxy normalises each to luminance 1.
+	std::array<glm::dvec3, kMaxPalette> palette{};
+	int        paletteCount = 0;
+	double     paletteWavelength = 1500.0;   // parsecs
 	double     textureMean = 1.0;            // derived by PrepareGalaxy: ⟨G⟩, divided out like Dust::filamentMean
 	double     youngLight  = 0.0;            // derived by PrepareScene: the arm population's mean L_V per star
 };

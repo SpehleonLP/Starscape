@@ -274,6 +274,47 @@ Expected<void> ReadColour(TableReader& reader, std::string_view key, glm::dvec3&
 	return {};
 }
 
+// An array of colours, each checked like `colour`: normalisation divides by the luminance.
+Expected<void> ReadPalette(TableReader& reader, Gas& gas)
+{
+	STARSCAPE_TRY_ASSIGN(array, reader.Array("palette"));
+	if (array == nullptr)
+	{
+		return {};
+	}
+	if (array->size() == 1 || array->size() > size_t(kMaxPalette))
+	{
+		return reader.Fail(array->source(), "palette", std::format("needs 0 or 2 to {} colours", kMaxPalette));
+	}
+	for (size_t i = 0; i < array->size(); ++i)
+	{
+		toml::node const& element = (*array)[i];
+		std::string const key = std::format("palette[{}]", i);
+		toml::array const* rgb = element.as_array();
+		if (rgb == nullptr || rgb->size() != 3)
+		{
+			return reader.Fail(element.source(), key, "expected an array of three numbers");
+		}
+		glm::dvec3 colour(0.0);
+		for (size_t c = 0; c < 3; ++c)
+		{
+			std::optional<double> const value = (*rgb)[c].is_boolean() ? std::nullopt : (*rgb)[c].value<double>();
+			if (!value || !std::isfinite(*value))
+			{
+				return reader.Fail((*rgb)[c].source(), key, "expected an array of three numbers");
+			}
+			colour[int(c)] = *value;
+		}
+		if (colour.x < 0.0 || colour.y < 0.0 || colour.z < 0.0 || !(Luminance(colour) > 0.0))
+		{
+			return reader.Fail(element.source(), key, "needs non-negative components and a positive luminance");
+		}
+		gas.palette[i] = colour;
+	}
+	gas.paletteCount = int(array->size());
+	return {};
+}
+
 Expected<void> ReadGas(TableReader& parent, Gas& gas)
 {
 	STARSCAPE_TRY_ASSIGN(table, parent.Table("gas"));
@@ -285,6 +326,8 @@ Expected<void> ReadGas(TableReader& parent, Gas& gas)
 	STARSCAPE_TRY(reader.Number("glow", gas.glow, 0.0, 1000.0));
 	STARSCAPE_TRY(ReadColour(reader, "colour", gas.colour));
 	STARSCAPE_TRY(ReadColour(reader, "core_colour", gas.coreColour));
+	STARSCAPE_TRY(ReadPalette(reader, gas));
+	STARSCAPE_TRY(reader.Number("palette_wavelength", gas.paletteWavelength, 10.0, 100000.0));
 	return reader.Finish();
 }
 

@@ -195,3 +195,26 @@ TEST_CASE("Gas keys are read and checked")
 	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\n[galaxy.disk]\ndensity = 0.1\ncutoff = 5000\npopulation = \"old-disk\"\n[galaxy.disk.gas]\nglow = 1.0\n")
 		.find("arm_population") != std::string::npos);
 }
+
+TEST_CASE("A gas palette is read and checked")
+{
+	// Mutation: deleting the luminance check in ReadPalette lets a black entry through to a division by zero.
+	std::string const head = std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.disk.gas]\nglow = 1.0\n";
+	Expected<Scene> const scene = ParseScene(head + "palette = [[1.0, 0.2, 0.3], [0.2, 1.0, 0.8], [1.0, 0.7, 0.2]]\npalette_wavelength = 900.0\n", "test.toml");
+	REQUIRE(scene.has_value());
+	Gas const& gas = scene->galaxies[0].disk.gas;
+	CHECK(gas.paletteCount == 3);
+	CHECK(gas.palette[2] == glm::dvec3(1.0, 0.7, 0.2));
+	CHECK(gas.paletteWavelength == 900.0);
+	CHECK(ParseScene(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n", "test.toml")->galaxies[0].disk.gas.paletteCount == 0);
+	CHECK(ParseScene(head + "palette = []\n", "test.toml")->galaxies[0].disk.gas.paletteCount == 0);
+	CHECK(ErrorOf(head + "palette = [[1.0, 0.2, 0.3]]\n").find("0 or 2 to 8") != std::string::npos);
+	CHECK(ErrorOf(head + "palette = [[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,0,0]]\n").find("0 or 2 to 8") != std::string::npos);
+	CHECK(ErrorOf(head + "palette = [[1.0, 0.2, 0.3], [0.0, 0.0, 0.0]]\n").find("palette[1]") != std::string::npos);
+	CHECK(ErrorOf(head + "palette = [[1.0, 0.2, 0.3], [-1.0, 1.0, 1.0]]\n").find("positive luminance") != std::string::npos);
+	CHECK(ErrorOf(head + "palette = [[1.0, 0.2, 0.3], [1.0, 1.0]]\n").find("three numbers") != std::string::npos);
+	CHECK(ErrorOf(head + "palette = [1.0, 0.2, 0.3]\n").find("three numbers") != std::string::npos);
+	CHECK(ErrorOf(head + "palette = \"warm\"\n").find("expected an array") != std::string::npos);
+	CHECK(ErrorOf(head + "palette_wavelength = 5.0\n").find("disk.gas.palette_wavelength") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.thick_disk.gas]\npalette = []\n").find("unknown key") != std::string::npos);
+}

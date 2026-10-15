@@ -3,7 +3,9 @@
 #include "presets.h"
 #include "rng.h"
 #include <doctest.h>
+#include <array>
 #include <cmath>
+#include <glm/geometric.hpp>
 
 using namespace starscape;
 
@@ -399,4 +401,102 @@ TEST_CASE("Disabled dust leaves the gas texture alone")
 		CHECK(Luminance(sa.gas) > 0.0);
 		CHECK(sb.gas == sa.gas);
 	}
+}
+
+TEST_CASE("A palette colours the gas by a large-scale field without changing its light")
+{
+	// Mutation: dropping the per-entry normalisation in NormaliseColours leaves entries off Y = 1.
+	Galaxy galaxy = GasDisk(1.0);
+	galaxy.disk.gas.palette = {glm::dvec3(2.0, 0.0, 0.0), glm::dvec3(0.0, 3.0, 0.0), glm::dvec3(0.0, 0.0, 4.0), glm::dvec3(1.0, 1.0, 0.0)};
+	galaxy.disk.gas.paletteCount = 4;
+	galaxy.disk.gas.paletteWavelength = 1500.0;
+	// A core colour equal to nothing in the palette would hide which entry a point took; make it one.
+	galaxy.disk.gas.coreColour = galaxy.disk.gas.palette[0];
+	PreparedGalaxy const prepared = PrepareGalaxy(galaxy);
+	for (int i = 0; i < 4; ++i)
+	{
+		CHECK(Luminance(prepared.galaxy.disk.gas.palette[size_t(i)]) == doctest::Approx(1.0).epsilon(1e-12));
+	}
+	Galaxy plain = galaxy;
+	plain.disk.gas.paletteCount = 0;
+	PreparedGalaxy const reference = PrepareGalaxy(plain);
+	RandomStream rng(17, Purpose::Test, 0, 0, 0);
+	std::array<int, 4> nearest{};
+	int const count = 100000;
+	for (int i = 0; i < count; ++i)
+	{
+		glm::dvec3 const p(rng.NextDouble() * 1e6 - 5e5, rng.NextDouble() * 1e6 - 5e5, rng.NextDouble() * 1e6 - 5e5);
+		GalaxySample sample;
+		GalaxySample without;
+		Evaluate(prepared, p, sample);
+		Evaluate(reference, p, without);
+		REQUIRE(Luminance(without.gas) > 0.0);
+		// Colour never changes the amount of light: the palette's gas is exactly as bright as the plain gas.
+		REQUIRE(Luminance(sample.gas) == doctest::Approx(Luminance(without.gas)).epsilon(1e-12));
+		glm::dvec3 const colour = sample.gas / Luminance(sample.gas);
+		int best = 0;
+		for (int e = 1; e < 4; ++e)
+		{
+			if (glm::distance(colour, prepared.galaxy.disk.gas.palette[size_t(e)]) < glm::distance(colour, prepared.galaxy.disk.gas.palette[size_t(best)]))
+			{
+				best = e;
+			}
+		}
+		++nearest[size_t(best)];
+	}
+	// Every entry appears. The spec asked for 10% each, but with 0.9 entries per σ the entry two steps
+	// from the field's mean is reached only in the tails (|z| > 1.1), so the floor is 1%. Task 7 corrects
+	// the spec's row when it folds in.
+	for (int e = 0; e < 4; ++e)
+	{
+		CHECK(nearest[size_t(e)] > count / 100);
+	}
+}
+
+TEST_CASE("A three-colour palette wraps from its last entry to its first")
+{
+	// Mutation: wrapping with `% kMaxPalette` instead of `% paletteCount` blends into a zeroed entry, and
+	// the gas's luminance drops below one.
+	Galaxy galaxy = GasDisk(1.0);
+	galaxy.disk.gas.palette = {glm::dvec3(1.0, 0.0, 0.0), glm::dvec3(0.0, 1.0, 0.0), glm::dvec3(0.0, 0.0, 1.0)};
+	galaxy.disk.gas.paletteCount = 3;
+	// A green core: any core mixing then shows as green, so red with blue and no green can only be the wrap.
+	galaxy.disk.gas.coreColour = {0.0, 1.0, 0.0};
+	PreparedGalaxy const prepared = PrepareGalaxy(galaxy);
+	Galaxy plain = galaxy;
+	plain.disk.gas.paletteCount = 0;
+	PreparedGalaxy const reference = PrepareGalaxy(plain);
+	RandomStream rng(43, Purpose::Test, 0, 0, 0);
+	bool blendedLastIntoFirst = false;
+	for (int i = 0; i < 100000; ++i)
+	{
+		glm::dvec3 const p(rng.NextDouble() * 1e6 - 5e5, rng.NextDouble() * 1e6 - 5e5, rng.NextDouble() * 1e6 - 5e5);
+		GalaxySample sample;
+		GalaxySample without;
+		Evaluate(prepared, p, sample);
+		Evaluate(reference, p, without);
+		REQUIRE(Luminance(without.gas) > 0.0);
+		// Colour never changes the amount of light: the palette's gas is exactly as bright as the plain gas.
+		REQUIRE(Luminance(sample.gas) == doctest::Approx(Luminance(without.gas)).epsilon(1e-12));
+		blendedLastIntoFirst = blendedLastIntoFirst || (sample.gas.x > 0.0 && sample.gas.z > 0.0 && sample.gas.y == 0.0);
+	}
+	CHECK(blendedLastIntoFirst);
+}
+
+TEST_CASE("The thick disk never takes the thin disk's palette")
+{
+	// Mutation: passing galaxy.disk.gas instead of the thick disk's own gas into its gas block lights it;
+	// a thick disk alone must stay dark.
+	Galaxy galaxy;
+	galaxy.thickDisk = {.enabled = true, .density = 1.0, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 1e9, .arms = {}, .population = 1,
+		.armPopulation = 1, .youngFraction = 0.5};
+	galaxy.disk.gas.glow = 1.0;
+	galaxy.disk.gas.youngLight = 1.0;
+	galaxy.disk.gas.paletteCount = 2;
+	galaxy.disk.gas.palette = {glm::dvec3(1.0, 0.0, 0.0), glm::dvec3(0.0, 0.0, 1.0)};
+	GalaxySample sample;
+	EvaluateLocal(PrepareGalaxy(galaxy).galaxy, {300.0, -200.0, 100.0}, sample);
+	// Without young stars the gas block never runs and the mutation could not show.
+	CHECK(sample.count >= 2);
+	CHECK(sample.gas == glm::dvec3(0.0));
 }
