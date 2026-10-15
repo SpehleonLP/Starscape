@@ -3,6 +3,7 @@
 #include "presets.h"
 #include "rng.h"
 #include <doctest.h>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <glm/geometric.hpp>
@@ -552,4 +553,125 @@ TEST_CASE("The large-scale field's mean is measured in noise space and divided o
 	Evaluate(doubled, p, halved);
 	REQUIRE(Luminance(once.gas) > 0.0);
 	CHECK(Luminance(halved.gas) == doctest::Approx(0.5 * Luminance(once.gas)).epsilon(1e-12));
+}
+
+namespace
+{
+
+// GasDisk with a bubble lit on its rim; the dust is real but faint, so the rim is the only gas.
+Galaxy RimDisk(double rim)
+{
+	Galaxy galaxy = GasDisk(0.0);
+	galaxy.dust = {.enabled = true, .extinction = 1e-6, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 1e9, .laneOffset = 0.0, .contrast = 1.0, .filament = 0.0,
+		.bubbleCenter = {0.0, 0.0, 0.0}, .bubbleRadius = 300.0, .bubbleHeight = 800.0};
+	galaxy.dust.bubbleRim = rim;
+	return galaxy;
+}
+
+double RimLight(PreparedGalaxy const& prepared, glm::dvec3 p)
+{
+	GalaxySample sample;
+	Evaluate(prepared, p, sample);
+	return Luminance(sample.gas);
+}
+
+}
+
+TEST_CASE("The rim glows on a shell just inside the bubble's edge, and nowhere else")
+{
+	// Mutation: centring the shell at q = 1 moves the peak out of [0.83, 0.87].
+	PreparedGalaxy const prepared = PrepareGalaxy(RimDisk(4.0));
+	RandomStream rng(23, Purpose::Test, 0, 0, 0);
+	for (int i = 0; i < 20000; ++i)
+	{
+		glm::dvec3 const d = glm::normalize(glm::dvec3(rng.NextDouble() - 0.5, rng.NextDouble() - 0.5, rng.NextDouble() - 0.5));
+		// q = 1 / |(d.x/300, d.y/300, d.z/800)| at unit scale; pick q away from the shell, then scale to it.
+		double const unit = std::sqrt((d.x * d.x + d.y * d.y) / (300.0 * 300.0) + d.z * d.z / (800.0 * 800.0));
+		for (double const q : {0.2, 0.6, 0.64, 1.06, 1.5, 3.0})
+		{
+			CHECK(RimLight(prepared, d * (q / unit)) == 0.0);
+		}
+	}
+	// Along radial lines through lit patches, the brightest point usually sits on the shell. The wisps
+	// swing the light by an order of magnitude over 30 pc, about the shell's own width, so a line's peak
+	// can ride a wisp off the shell; the averaged test below pins the profile itself.
+	int lines = 0;
+	int onShell = 0;
+	for (int i = 0; i < 2000 && lines < 50; ++i)
+	{
+		glm::dvec3 const d = glm::normalize(glm::dvec3(rng.NextDouble() - 0.5, rng.NextDouble() - 0.5, rng.NextDouble() - 0.5));
+		double const unit = std::sqrt((d.x * d.x + d.y * d.y) / (300.0 * 300.0) + d.z * d.z / (800.0 * 800.0));
+		double bestQ = 0.0;
+		double best = 0.0;
+		for (double q = 0.66; q <= 1.04; q += 0.002)
+		{
+			double const light = RimLight(prepared, d * (q / unit));
+			if (light > best)
+			{
+				best = light;
+				bestQ = q;
+			}
+		}
+		if (best > 0.0)
+		{
+			++lines;
+			onShell += (bestQ >= 0.80 && bestQ <= 0.90) ? 1 : 0;
+			CHECK(bestQ >= 0.66);
+			CHECK(bestQ <= 1.04);
+		}
+	}
+	CHECK(lines == 50);
+	CHECK(onShell >= 20);
+}
+
+TEST_CASE("Averaged over the wall, the rim peaks at q = 0.85")
+{
+	// Mutation: centring the shell at q = 1 moves the averaged peak out of [0.83, 0.87].
+	PreparedGalaxy const prepared = PrepareGalaxy(RimDisk(4.0));
+	RandomStream rng(29, Purpose::Test, 0, 0, 0);
+	std::array<double, 61> profile{};   // q from 0.70 to 1.00 in steps of 0.005
+	for (int i = 0; i < 4000; ++i)
+	{
+		glm::dvec3 const d = glm::normalize(glm::dvec3(rng.NextDouble() - 0.5, rng.NextDouble() - 0.5, rng.NextDouble() - 0.5));
+		double const unit = std::sqrt((d.x * d.x + d.y * d.y) / (300.0 * 300.0) + d.z * d.z / (800.0 * 800.0));
+		for (size_t k = 0; k < profile.size(); ++k)
+		{
+			profile[k] += RimLight(prepared, d * ((0.70 + 0.005 * double(k)) / unit));
+		}
+	}
+	size_t const peak = size_t(std::max_element(profile.begin(), profile.end()) - profile.begin());
+	CHECK(0.70 + 0.005 * double(peak) >= 0.83);
+	CHECK(0.70 + 0.005 * double(peak) <= 0.87);
+}
+
+TEST_CASE("The rim lights patches of the wall, not all of it")
+{
+	// Mutation: dropping the - 0.5 offset in the rim's mask lights most of the wall.
+	PreparedGalaxy const prepared = PrepareGalaxy(RimDisk(4.0));
+	RandomStream rng(31, Purpose::Test, 0, 0, 0);
+	int dark = 0;
+	int const count = 100000;
+	for (int i = 0; i < count; ++i)
+	{
+		glm::dvec3 const d = glm::normalize(glm::dvec3(rng.NextDouble() - 0.5, rng.NextDouble() - 0.5, rng.NextDouble() - 0.5));
+		double const unit = std::sqrt((d.x * d.x + d.y * d.y) / (300.0 * 300.0) + d.z * d.z / (800.0 * 800.0));
+		dark += RimLight(prepared, d * (0.85 / unit)) == 0.0 ? 1 : 0;
+	}
+	CHECK(double(dark) / count > 0.60);
+	CHECK(double(dark) / count < 0.80);
+}
+
+TEST_CASE("Without dust there is no rim")
+{
+	// Mutation: dropping the dust.enabled guard in RimGlow lights a bubble whose dust is gone.
+	Galaxy galaxy = RimDisk(4.0);
+	galaxy.dust.enabled = false;
+	PreparedGalaxy const prepared = PrepareGalaxy(galaxy);
+	RandomStream rng(37, Purpose::Test, 0, 0, 0);
+	for (int i = 0; i < 2000; ++i)
+	{
+		glm::dvec3 const d = glm::normalize(glm::dvec3(rng.NextDouble() - 0.5, rng.NextDouble() - 0.5, rng.NextDouble() - 0.5));
+		double const unit = std::sqrt((d.x * d.x + d.y * d.y) / (300.0 * 300.0) + d.z * d.z / (800.0 * 800.0));
+		CHECK(RimLight(prepared, d * (0.85 / unit)) == 0.0);
+	}
 }

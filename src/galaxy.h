@@ -102,6 +102,9 @@ struct Dust
 	double bubbleRadius = 0.0;  // semi-axis in the plane, parsecs
 	double bubbleHeight = 0.0;  // semi-axis along the spin axis; bubbles open into chimneys toward the halo
 	double filamentMean = 1.0;  // derived by PrepareGalaxy: the field's spatial mean, divided out so α₀ stays the mean
+	// Gas glowing on the bubble's wall, lit in patches: arcs across the sky from inside it. Its strength
+	// is a multiple of the young stars' light at the wall's radius; it needs the thin disk's arm population.
+	double bubbleRim = 0.0;
 };
 
 struct Galaxy

@@ -233,3 +233,16 @@ TEST_CASE("Large-scale gas keys are read and checked")
 	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\n[galaxy.disk]\ndensity = 0.1\ncutoff = 5000\npopulation = \"old-disk\"\n[galaxy.disk.gas]\nlarge_glow = 1.0\n")
 		.find("large_glow needs arm_population") != std::string::npos);
 }
+
+TEST_CASE("The bubble's rim is read and needs young stars")
+{
+	// Mutation: deleting the arm_population check in ReadBubble reddens the last check.
+	std::string const head = std::string(kHead) + kObs + "[[galaxy]]\npreset = \"milky-way\"\n[galaxy.dust]\n";
+	Expected<Scene> const scene = ParseScene(head + "bubble = { center = [8200.0, 0.0, 20.0], radius = 300.0, height = 800.0, rim = 4.0 }\n", "test.toml");
+	REQUIRE(scene.has_value());
+	CHECK(scene->galaxies[0].dust.bubbleRim == 4.0);
+	CHECK(ParseScene(head + "bubble = { center = [8200.0, 0.0, 20.0], radius = 300.0, height = 800.0 }\n", "test.toml")->galaxies[0].dust.bubbleRim == 0.0);
+	CHECK(ErrorOf(head + "bubble = { center = [0.0, 0.0, 0.0], radius = 300.0, height = 800.0, rim = 1001.0 }\n").find("dust.bubble.rim") != std::string::npos);
+	CHECK(ErrorOf(std::string(kHead) + kObs + "[[galaxy]]\npreset = \"dwarf\"\n[galaxy.disk]\ndensity = 0.1\ncutoff = 5000\npopulation = \"old-disk\"\n[galaxy.dust]\nbubble = { center = [0.0, 0.0, 0.0], radius = 300.0, height = 800.0, rim = 1.0 }\n")
+		.find("rim needs the thin disk's arm_population") != std::string::npos);
+}

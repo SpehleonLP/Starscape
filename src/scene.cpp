@@ -433,7 +433,7 @@ Expected<void> ReadHalo(TableReader& parent, Halo& halo, std::span<Population co
 	return reader.Finish();
 }
 
-Expected<void> ReadBubble(TableReader& parent, Dust& dust)
+Expected<void> ReadBubble(TableReader& parent, Dust& dust, Disk const& thin)
 {
 	STARSCAPE_TRY_ASSIGN(table, parent.Table("bubble"));
 	if (table == nullptr)
@@ -449,10 +449,15 @@ Expected<void> ReadBubble(TableReader& parent, Dust& dust)
 	{
 		return reader.Fail("", "needs a positive radius and height");
 	}
+	STARSCAPE_TRY(reader.Number("rim", dust.bubbleRim, 0.0, 1000.0));
+	if (dust.bubbleRim > 0.0 && thin.armPopulation < 0)
+	{
+		return reader.Fail("rim", "rim needs the thin disk's arm_population: young stars light the wall");
+	}
 	return reader.Finish();
 }
 
-Expected<void> ReadDust(TableReader& parent, Dust& dust)
+Expected<void> ReadDust(TableReader& parent, Dust& dust, Disk const& thin)
 {
 	STARSCAPE_TRY_ASSIGN(table, parent.Table("dust"));
 	if (table == nullptr)
@@ -469,7 +474,7 @@ Expected<void> ReadDust(TableReader& parent, Dust& dust)
 	STARSCAPE_TRY(reader.Number("lane_offset", dust.laneOffset, -5.0, 5.0));
 	STARSCAPE_TRY(reader.Number("contrast", dust.contrast, 0.0, 1000.0));
 	STARSCAPE_TRY(reader.Number("filament", dust.filament, 0.0, 10.0));
-	STARSCAPE_TRY(ReadBubble(reader, dust));
+	STARSCAPE_TRY(ReadBubble(reader, dust, thin));
 	STARSCAPE_TRY(CheckUsable(reader, "dust", dust.enabled, 0, dust.cutoff));
 	return reader.Finish();
 }
@@ -498,7 +503,7 @@ Expected<Galaxy> ReadGalaxy(toml::table const& table, std::string_view source, s
 	STARSCAPE_TRY(ReadDisk(reader, "thick_disk", galaxy.thickDisk, populations, false));
 	STARSCAPE_TRY(ReadBulge(reader, galaxy.bulge, populations));
 	STARSCAPE_TRY(ReadHalo(reader, galaxy.halo, populations));
-	STARSCAPE_TRY(ReadDust(reader, galaxy.dust));
+	STARSCAPE_TRY(ReadDust(reader, galaxy.dust, galaxy.disk));
 	STARSCAPE_TRY(reader.Finish());
 	return galaxy;
 }

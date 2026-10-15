@@ -35,6 +35,9 @@ constexpr int kGasOctaves = 5;
 constexpr uint64_t kPaletteSalt = 0x9A1E77Eull;
 constexpr uint64_t kLargeGasSalt = 0xB16B16ull;
 constexpr int kLargeGasOctaves = 4;
+// The rim's patches and wisps. Fixed rather than scene keys: the owner-approved nebula look was tuned on them.
+constexpr uint64_t kRimMaskSalt = 0x81B1ull;
+constexpr uint64_t kRimWispSalt = 0x81B0ull;
 
 // A log-normal field whose logarithm has standard deviation `sigma`, given z of unit variance. Holding
 // the mean near one lets structure move stars and dust around without changing how much there is,
@@ -104,6 +107,13 @@ double DustFilaments(Galaxy const& galaxy, glm::dvec3 p)
 	return DustField(galaxy.dust, p / DustWavelength(galaxy), galaxy.seed) / galaxy.dust.filamentMean;
 }
 
+// The bubble's normalised radius: 1 on its ellipsoid. Only meaningful when it has a radius.
+double BubbleRadius(Dust const& dust, glm::dvec3 p)
+{
+	glm::dvec3 const d = p - dust.bubbleCenter;
+	return std::sqrt((d.x * d.x + d.y * d.y) / (dust.bubbleRadius * dust.bubbleRadius) + d.z * d.z / (dust.bubbleHeight * dust.bubbleHeight));
+}
+
 // Empty within 70% of the bubble's semi-axes, ramping smoothly to one at its edge; one without a bubble.
 // Without the cavity, filaments within a few hundred parsecs of an observer in the plane blot the high
 // latitudes, where the real sky's are faint cirrus.
@@ -113,9 +123,7 @@ double BubbleFactor(Dust const& dust, glm::dvec3 p)
 	{
 		return 1.0;
 	}
-	glm::dvec3 const d = p - dust.bubbleCenter;
-	double const q = std::sqrt((d.x * d.x + d.y * d.y) / (dust.bubbleRadius * dust.bubbleRadius) + d.z * d.z / (dust.bubbleHeight * dust.bubbleHeight));
-	double const t = std::clamp((q - 0.7) / 0.3, 0.0, 1.0);
+	double const t = std::clamp((BubbleRadius(dust, p) - 0.7) / 0.3, 0.0, 1.0);
 	return t * t * (3.0 - 2.0 * t);
 }
 
@@ -270,6 +278,37 @@ double LargeGasMean(Gas const& gas, uint64_t seed)
 	return SpatialMean([&](glm::dvec3 q) { return LargeGasField(q, seed); });
 }
 
+// A shell just inside the dust's ramp, so most of it sits in front of the wall's dust. Not confined to the
+// young disk's thickness: the bubble opens into chimneys, so the wall wraps the whole sky.
+glm::dvec3 RimGlow(Galaxy const& galaxy, double radius, glm::dvec3 p)
+{
+	Dust const& dust = galaxy.dust;
+	Disk const& disk = galaxy.disk;
+	if (dust.bubbleRim <= 0.0 || !dust.enabled || dust.bubbleRadius <= 0.0 || !disk.enabled)
+	{
+		return glm::dvec3(0.0);
+	}
+	double const offset = BubbleRadius(dust, p) - 0.85;
+	// Cut where the Gaussian is below e^-25, so the term costs nothing away from the wall.
+	if (std::abs(offset) > 0.2)
+	{
+		return glm::dvec3(0.0);
+	}
+	// Only patches of the wall glow: the eye finds arcs where a lit patch's edge runs along the line of sight.
+	double const mask = std::clamp(Fbm(p / 150.0, 3, galaxy.seed ^ kRimMaskSalt) / kFbmSigma - 0.5, 0.0, 1.0);
+	if (mask <= 0.0)
+	{
+		return glm::dvec3(0.0);
+	}
+	double const shell = std::exp(-(offset / 0.04) * (offset / 0.04));
+	double const wisps = 0.3 + 6.0 * std::pow(std::max(0.0, RidgedFbm(p / 30.0, 5, galaxy.seed ^ kRimWispSalt)), 6.0);
+	// The young density the disk would have at this radius, without arms, associations or its thickness.
+	double const reference = disk.density * std::exp(-radius / disk.scaleLength) * (disk.youngFraction + disk.armYoungFraction);
+	double const light = dust.bubbleRim * disk.gas.youngLight * reference * shell * mask * wisps;
+	// Four times the palette's frequency gives the rim its own, finer colour changes.
+	return (light * 100.0 * kFluxAt10pc) * PaletteColour(galaxy, disk.gas, 4.0 * p);
+}
+
 PreparedGalaxy PrepareGalaxy(Galaxy const& galaxy)
 {
 	PreparedGalaxy prepared;
@@ -360,6 +399,10 @@ void EvaluateLocal(Galaxy const& galaxy, glm::dvec3 p, GalaxySample& out)
 	};
 	addDisk(galaxy.disk);
 	addDisk(galaxy.thickDisk);
+	if (r <= galaxy.disk.cutoff)
+	{
+		out.gas += RimGlow(galaxy, radius, p);
+	}
 
 	if (galaxy.bulge.enabled && r <= galaxy.bulge.cutoff)
 	{
