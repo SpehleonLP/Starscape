@@ -1,5 +1,5 @@
 #include "cook.h"
-#include "gpu/march.h"
+#include "gpu/gpu_march.h"
 #include "parallel.h"
 #include <kre_starscape.h>
 #include <algorithm>

@@ -15,6 +15,19 @@ struct DeviceOptions
 	bool allowSoftware = false;   // tests only: let a CPU-type device such as llvmpipe through
 };
 
+// What a physical device offers, as far as qualifying it goes.
+struct DeviceFacts
+{
+	uint32_t             apiVersion = 0;
+	bool                 computeQueue = false;
+	bool                 shaderInt64 = false;
+	bool                 scalarBlockLayout = false;
+	VkPhysicalDeviceType type = VK_PHYSICAL_DEVICE_TYPE_OTHER;
+};
+
+// The first requirement `facts` misses, worded to follow "lacks"; empty when the device qualifies.
+std::string Shortfall(DeviceFacts const& facts, DeviceOptions const& options);
+
 struct Buffer
 {
 	VkBuffer       buffer = VK_NULL_HANDLE;
@@ -34,6 +47,8 @@ public:
 	std::string const& Name() const { return m_name; }
 	std::string const& Driver() const { return m_driver; }
 	VkDevice Handle() const { return m_device; }
+	// True only when the queue was created with the LOW global priority request.
+	bool LowPriority() const { return m_lowPriority; }
 	// Nanoseconds per timestamp tick, for shaders' timestamp queries.
 	float TimestampPeriod() const { return m_timestampPeriod; }
 
@@ -57,6 +72,7 @@ private:
 	VkFence          m_fence = VK_NULL_HANDLE;
 	uint32_t         m_queueFamily = 0;
 	float            m_timestampPeriod = 1.0f;
+	bool             m_lowPriority = false;
 	VkPhysicalDeviceMemoryProperties m_memory{};
 	std::string      m_name;
 	std::string      m_driver;

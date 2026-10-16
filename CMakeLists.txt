@@ -74,7 +74,7 @@ if(STARSCAPE_GPU)
 	# Vulkan create-info structs are written with designated initializers that name only the fields in use;
 	# the omitted ones are meant to be zero, which is what this warning objects to.
 	if(NOT MSVC)
-		set_source_files_properties(src/gpu/device.cpp tests/gpu/test_device.cpp PROPERTIES COMPILE_OPTIONS -Wno-missing-field-initializers)
+		set_source_files_properties(src/gpu/device.cpp PROPERTIES COMPILE_OPTIONS -Wno-missing-field-initializers)
 	endif()
 	target_compile_definitions(starscape-core PUBLIC STARSCAPE_GPU=1)
 	target_link_libraries(starscape-core PUBLIC starscape-volk)

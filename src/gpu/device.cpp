@@ -49,6 +49,36 @@ int TypeRank(VkPhysicalDeviceType type)
 	}
 }
 
+}
+
+std::string Shortfall(DeviceFacts const& facts, DeviceOptions const& options)
+{
+	if (facts.apiVersion < VK_API_VERSION_1_2)
+	{
+		return "Vulkan 1.2";
+	}
+	if (!facts.computeQueue)
+	{
+		return "a compute queue";
+	}
+	if (!facts.shaderInt64)
+	{
+		return "shaderInt64";
+	}
+	if (!facts.scalarBlockLayout)
+	{
+		return "scalarBlockLayout";
+	}
+	if (facts.type == VK_PHYSICAL_DEVICE_TYPE_CPU && !options.allowSoftware)
+	{
+		return "a GPU (it is a CPU device, not used for cooks)";
+	}
+	return {};
+}
+
+namespace
+{
+
 Candidate Examine(VkPhysicalDevice device, DeviceOptions const& options)
 {
 	Candidate c;
@@ -60,34 +90,25 @@ Candidate Examine(VkPhysicalDevice device, DeviceOptions const& options)
 	c.vendor = properties.vendorID;
 	c.driverVersion = properties.driverVersion;
 	c.timestampPeriod = properties.limits.timestampPeriod;
-	VkPhysicalDeviceVulkan12Features features12{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
-	VkPhysicalDeviceFeatures2 features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &features12};
-	vkGetPhysicalDeviceFeatures2(device, &features);
+	DeviceFacts facts;
+	facts.apiVersion = properties.apiVersion;
+	facts.type = properties.deviceType;
 	uint32_t families = 0;
 	vkGetPhysicalDeviceQueueFamilyProperties(device, &families, nullptr);
 	std::vector<VkQueueFamilyProperties> family(families);
 	vkGetPhysicalDeviceQueueFamilyProperties(device, &families, family.data());
 	auto const compute = std::find_if(family.begin(), family.end(), [](VkQueueFamilyProperties const& f) { return (f.queueFlags & VK_QUEUE_COMPUTE_BIT) != 0; });
-	if (properties.apiVersion < VK_API_VERSION_1_2)
+	facts.computeQueue = compute != family.end();
+	// A device below 1.2 need not implement vkGetPhysicalDeviceFeatures2, so it is not asked.
+	if (properties.apiVersion >= VK_API_VERSION_1_2)
 	{
-		c.lacks = "Vulkan 1.2";
+		VkPhysicalDeviceVulkan12Features features12{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+		VkPhysicalDeviceFeatures2 features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &features12};
+		vkGetPhysicalDeviceFeatures2(device, &features);
+		facts.shaderInt64 = features.features.shaderInt64 != VK_FALSE;
+		facts.scalarBlockLayout = features12.scalarBlockLayout != VK_FALSE;
 	}
-	else if (compute == family.end())
-	{
-		c.lacks = "a compute queue";
-	}
-	else if (!features.features.shaderInt64)
-	{
-		c.lacks = "shaderInt64";
-	}
-	else if (!features12.scalarBlockLayout)
-	{
-		c.lacks = "scalarBlockLayout";
-	}
-	else if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU && !options.allowSoftware)
-	{
-		c.lacks = "a GPU (it is a CPU device, not used for cooks)";
-	}
+	c.lacks = Shortfall(facts, options);
 	c.queueFamily = compute == family.end() ? 0 : uint32_t(compute - family.begin());
 	return c;
 }
@@ -198,29 +219,52 @@ Expected<std::unique_ptr<Device>> OpenDevice(DeviceOptions const& options)
 		priorityExtension = VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME;
 	}
 
-	// The cook shares the machine with the owner's desktop, so its queue asks for the lowest priority; the
-	// driver may refuse that (it needs no privilege today, but this is the documented failure), and then the
-	// cook runs at the default.
+	// The cook shares the machine with the owner's desktop, so it asks the driver for the LOW global priority.
+	// A driver that lists the extension may still not offer LOW for this family, and another failure code
+	// would then make a usable GPU look unusable; so the request is chained only when the family lists LOW.
+	// The driver may also refuse it (documented as NOT_PERMITTED); then the cook runs at the default.
+	bool offersLow = false;
+	if (priorityExtension != nullptr)
+	{
+		uint32_t familyCount = 0;
+		vkGetPhysicalDeviceQueueFamilyProperties2(best->device, &familyCount, nullptr);
+		std::vector<VkQueueFamilyGlobalPriorityPropertiesKHR> priorities(familyCount,
+			VkQueueFamilyGlobalPriorityPropertiesKHR{.sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_GLOBAL_PRIORITY_PROPERTIES_KHR});
+		std::vector<VkQueueFamilyProperties2> families(familyCount, VkQueueFamilyProperties2{.sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2});
+		for (uint32_t i = 0; i < familyCount; ++i)
+		{
+			families[i].pNext = &priorities[i];
+		}
+		vkGetPhysicalDeviceQueueFamilyProperties2(best->device, &familyCount, families.data());
+		VkQueueFamilyGlobalPriorityPropertiesKHR const& chosen = priorities[best->queueFamily];
+		offersLow = std::find(chosen.priorities, chosen.priorities + chosen.priorityCount, VK_QUEUE_GLOBAL_PRIORITY_LOW_KHR)
+			!= chosen.priorities + chosen.priorityCount;
+	}
+	// The priority itself comes from the global-priority struct below; this per-queue value only orders queues
+	// within the family, and this device makes one.
 	float const queuePriority = 1.0f;
 	VkResult created = VK_ERROR_INITIALIZATION_FAILED;
-	for (bool lowPriority : {priorityExtension != nullptr, false})
+	bool lowPriority = false;
+	for (bool tryLow : {offersLow, false})
 	{
 		VkDeviceQueueGlobalPriorityCreateInfoKHR const priority{.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_KHR,
 			.globalPriority = VK_QUEUE_GLOBAL_PRIORITY_LOW_KHR};
-		VkDeviceQueueCreateInfo const queueInfo{.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .pNext = lowPriority ? &priority : nullptr,
+		VkDeviceQueueCreateInfo const queueInfo{.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .pNext = tryLow ? &priority : nullptr,
 			.queueFamilyIndex = best->queueFamily, .queueCount = 1, .pQueuePriorities = &queuePriority};
 		VkPhysicalDeviceVulkan12Features features12{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .scalarBlockLayout = VK_TRUE};
 		VkPhysicalDeviceFeatures2 features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &features12};
 		features.features.shaderInt64 = VK_TRUE;
 		VkDeviceCreateInfo const deviceInfo{.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &features,
 			.queueCreateInfoCount = 1, .pQueueCreateInfos = &queueInfo,
-			.enabledExtensionCount = lowPriority ? 1u : 0u, .ppEnabledExtensionNames = lowPriority ? &priorityExtension : nullptr};
+			.enabledExtensionCount = tryLow ? 1u : 0u, .ppEnabledExtensionNames = tryLow ? &priorityExtension : nullptr};
 		created = vkCreateDevice(best->device, &deviceInfo, nullptr, &device->m_device);
-		if (created == VK_SUCCESS || created != VK_ERROR_NOT_PERMITTED_KHR || !lowPriority)
+		lowPriority = tryLow;
+		if (created == VK_SUCCESS || created != VK_ERROR_NOT_PERMITTED_KHR || !tryLow)
 		{
 			break;
 		}
 	}
+	device->m_lowPriority = created == VK_SUCCESS && lowPriority;
 	if (created != VK_SUCCESS)
 	{
 		device->m_device = VK_NULL_HANDLE;
