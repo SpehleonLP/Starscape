@@ -389,9 +389,43 @@ N(>F) ≤ N, interpolated within the bin.
 
 ### The march
 
-The cubemap has 6 · S² texels (S = `face_size`). For each texel the cook
-traces `spp` stratified, jittered directions within the texel (spp = 16 at
-`final`, 1 at `quick`). Along each direction:
+The cubemap has 6 · S² texels (S = `face_size`). A quality has spp = P² rays per
+texel, P = `samplesPerAxis` (4 at `final`, so spp = 16; 1 at `quick`). The cook
+does not fire them together: it runs **progressive passes**, one per stratum of
+the texel's P × P grid, and every pass fires exactly one ray per texel.
+
+**Pass order.** The strata are visited so that every prefix of passes is spread
+evenly over the texel. For P = 4, pass p with bits p₀ (lowest) to p₃ visits:
+
+    quadrant  qx = p₀,      qy = p₀ ⊕ p₁
+    sub-cell  sx = p₂,      sy = p₂ ⊕ p₃
+    stratum   x  = 2qx + sx, y = 2qy + sy
+
+Pass 0 hits one corner and pass 1 the opposite one; passes 0–3 put one ray in
+each 2 × 2 quadrant; passes 0–7 put two diagonal rays in each quadrant; passes
+0–15 hit every stratum once. For P = 1 the single pass is the whole cook.
+
+**Jitter.** A ray's offset inside its stratum k = P·y + x (row-major) comes from
+one Philox block, `Philox4x32_10({texel, 0, Jitter << 24, k}, key)`, whose two
+uniforms are the offsets. A pass computes the block directly, with no stream to
+replay, so the host and the GPU place every ray at the same jitter, up to the
+float rounding of the final direction.
+
+**Accumulation and output.** Per texel the cook keeps a running sum of diffuse
+radiance (RGB) and of the point budget (24 bins). Each pass adds
+`weight · result` with weight 1/spp; after n passes the stored value is
+sum · spp / n, the mean of the rays fired so far. **After every pass** the cook
+writes a complete output: it scales the sums to the current mean, runs the
+star-count bound checks (`kMaxStars`, `kMaxStarsPerTexelBin`), draws the stars
+on the host from that budget (the Poisson streams are keyed by texel and bin,
+not by pass, so a texel's stars change only where its budget did), and writes
+the `.kre_starscape` and the preview, if one was asked for, through a temporary
+file and a rename. Stopping a cook at any moment (Ctrl-C, a kill, a crash)
+leaves the last completed pass on disk; the cook handles no signals. Progress
+reports `pass n/spp` with an ETA for the whole cook, and the closing summary
+names the passes completed.
+
+Along each ray:
 
 1. Intersect the ray with every component's bounding sphere and merge the
    intervals. Gaps between intervals are empty: no emission, no dust.
@@ -431,6 +465,90 @@ traces `spp` stratified, jittered directions within the texel (spp = 16 at
 s_min defaults to 0.05 pc so the observer's own star system is excluded; the
 engine draws its own sun. The march ends at the last interval's exit.
 
+### The GPU march
+
+The march of the previous section runs as a Vulkan 1.2 compute shader, one
+invocation per texel per pass. The calibration, the star draws and the preview
+stay on the host, because they are small and branchy; the host therefore still
+evaluates the field model (`EvaluateLocal`, in double) for the calibration and for
+re-marching each drawn star.
+
+**One source for the field model.** The noise, `EvaluateLocal` for every galaxy
+component and the gas and nebula terms, the population tables' per-step lookups
+and the step logic (transmittance, the straddle split, the budget) live in
+`src/field/*.glsl.h`. These files compile as C++ (doubles, glm) and as GLSL
+(floats); `real`, `real3` and `INOUT(T)` are macros that name the type or the
+out-parameter in each language. The shared code stays in the intersection of the
+two languages: no lambdas, templates, references other than `INOUT`, standard
+containers or recursion, and fixed-size arrays only. The ray-interval merging,
+the threading and the GPU dispatch are native to each side.
+
+**Precision.** The GPU computes in float, except the lattice hash, which keeps
+its 64-bit integer mixing (`shaderInt64`) so every sky's noise is the noise the
+look was tuned on. Float suffices because of where positions are evaluated:
+
+- Each galaxy is evaluated in its own frame, relative to its own centre, with the
+  observer carried into that frame in double. A galaxy 780 kpc away never puts
+  780 kpc into a noise coordinate; coordinates reach about 15 kpc / 25 pc × 2⁵ ≈
+  2 × 10⁴ lattice units, where a float resolves 2 × 10⁻³ of a cell.
+- Distance along a ray is measured from the start of its interval, not from the
+  observer.
+
+The GPU's field therefore agrees with the host's double evaluation only to float's
+floor. The dust log-normal magnifies the rounding of a point to float about
+26-fold: a GPU exact on its float input still scores 2.9 × 10⁻⁴ on the Milky Way.
+The arm phase reaches about 10 rad and needs about 3 × 10⁻⁷, which float cannot
+hold: the small spiral measures 1.5 × 10⁻³. The field probe's tolerance is
+therefore **2 × 10⁻³** relative at the 99.9th percentile, an owner ruling that
+records float's measured floor. A measured error above it is a finding to bring
+to the owner, not a reason to loosen the test.
+
+**Determinism.** For a given device and driver the output is deterministic: a
+fixed pass order, no atomics, and each texel accumulated by one invocation. It is
+not the same across devices, and a file's bytes depend on the one that marched.
+The closing log line names that device, its name and driver version, and the
+queue priority it ran at.
+
+**Vulkan.**
+
+- *Device.* A headless instance and a compute queue; no surface and no
+  window-system extension. Required: Vulkan 1.2, `shaderInt64`,
+  `scalarBlockLayout` and a compute-capable queue. A software (CPU-type) device
+  does not qualify. When the device offers a global-priority extension the queue
+  requests low priority, because the GPU is shared with the desktop.
+- *Loading.* The binary does not link `libvulkan`; it loads Vulkan at run time
+  through vendored volk and builds against vendored Vulkan-Headers (both in
+  `third_party/VERSIONS`). Without Vulkan the binary still runs and a cook
+  refuses.
+- *Shaders.* GLSL compute shaders, compiled to SPIR-V at build time by
+  `glslangValidator` (required) and embedded in the binary.
+- *Data.* The prepared galaxies, the population tables and the march parameters
+  are uploaded once per cook as storage buffers.
+- *Tiles.* A pass covers the six faces in tiles of rows. The first tile is 8
+  rows; each later tile is sized from the previous one's measured time to stay
+  near 0.25 s per dispatch, which keeps the desktop responsive and the driver's
+  watchdog quiet.
+- *Accumulators.* The per-texel sums (3 radiance floats and 24 budget bins) live
+  on the host. Around each face's dispatches that face's slice is uploaded and
+  read back; at face 2048 a slice is 4 M texels × 27 floats ≈ 450 MB, well under a
+  second against minutes of marching. The host holds 6 · S² · 27 · 4 bytes in all,
+  42 MB at face 256 and 2.7 GB at 2048.
+
+**Refusals.** A cook is an input error (exit 1, no file written), raised before
+the calibration starts, when:
+
+- **no GPU qualifies.** The message is `no GPU to march on: ` followed by what the
+  machine lacks (Vulkan itself, the Vulkan 1.2 version, `shaderInt64`,
+  `scalarBlockLayout`, a compute queue, a non-software device), or by
+  `the GPU is disabled by STARSCAPE_GPU_DISABLE` when that environment variable is
+  set;
+- **the scene has more than 16 galaxies.** The shader's per-galaxy arrays hold 16;
+  the message names the cap;
+- **a face is too large for the device's buffers.** The face-sum buffer (and every
+  other storage buffer) must fit the device's `maxStorageBufferRange` and
+  `maxMemoryAllocationSize`; the message names the buffer, its size in bytes and
+  the limit it exceeds.
+
 ### Drawing the stars
 
 For each texel and bin, the star count is Poisson(B[texel][i]). For the k-th
@@ -464,13 +582,10 @@ Points plus diffuse equal the full sky's light in expectation. Lowering
 All random draws use a counter-based generator (Philox 4×32-10) keyed on
 (seed, purpose, texel, bin, index). Noise fields are seeded per galaxy. No draw
 depends on thread scheduling, so output is byte-identical on any thread count.
-The march runs on the GPU (`docs/specs/2026-10-15-gpu-march.md`), one invocation
-per texel. It needs a Vulkan 1.2 device with a compute queue, `shaderInt64` and
-`scalarBlockLayout` that is not a software (CPU-type) device; without one a cook
-is an input error naming what the machine lacks. The calibration and the star
-draws run on CPU threads, distributed over texels with a shared atomic counter,
-each texel's results written to its own slot.
-The bytes depend on the GPU and its driver, never on the run.
+The march runs on the GPU (*The GPU march*), one invocation per texel. The calibration
+and the star draws run on host threads, distributed over texels with a shared atomic
+counter, each texel's results written to its own slot. The bytes depend on the GPU
+and its driver, never on the run.
 
 ## 3. File format
 
@@ -644,15 +759,22 @@ position = [780000.0, 120000.0, -40000.0]
 ### CLI
 
 ```
-starscape cook    <scene.toml> -o <out.kre_starscape> [--preview <out.hdr>] [--threads N] [--quick]
+starscape cook    <scene.toml> -o <out.kre_starscape> [--preview <out.hdr>] [--threads N] [--quick | --draft] [--width N]
 starscape preview <in.kre_starscape> -o <out.hdr> [--width N] [--exposure EV]
 starscape inspect <in.kre_starscape>
 ```
 
-- `cook` prints timestamped progress (phase, per-face percentage, ETA) and ends
-  with F_res, the star count, and the share of total flux in points vs diffuse.
-  `--quick` overrides `quality`. Output goes to a temporary file in the
-  destination directory and is renamed into place on success.
+- `cook` prints timestamped progress (phase, per-face percentage, ETA) and, after
+  every pass, `pass n/spp written`. The output file and the preview are rewritten
+  after each pass (see *The march*), so a stopped cook leaves a usable sky. The
+  closing lines name the passes completed and the device that marched, then give
+  F_res, the star count, and the share of total flux in points vs diffuse.
+  `--quick` overrides `quality`; `--draft` is `--quick` with the face capped at 64
+  and the preview at 1024 wide. `--threads` sets the host threads of the
+  calibration, the star draws and the preview. A cook always marches on the GPU;
+  with no qualifying GPU it exits 1 with the reason and writes nothing (*The GPU
+  march*). Output goes to a temporary file in the destination directory and is
+  renamed into place.
 - `preview` re-renders a preview from an existing file.
 - `inspect` prints the header, a flux histogram of the stars by magnitude, the
   total diffuse flux (radiance integrated over solid angle) and the
@@ -666,8 +788,36 @@ Tests use vendored doctest and run under `ctest`. Each test below must be shown
 to fail under its listed mutation before it is relied on; the mutation is
 recorded in the test's comment.
 
+Four kinds of entry:
+
+- `unit` (`starscape-tests`): needs no GPU. Format, noise, galaxy, scene, writer,
+  preview, population and the host's march step code.
+- `gpu` (`starscape-gpu-tests`): needs a Vulkan device; a software device is
+  allowed. Device selection, the buffer layouts, the hash and Philox probes, the
+  jitter probe and the field probe.
+- `cook` (`starscape-cook-tests`): everything that cooks, so it needs what a cook
+  needs. Analytic cooks, partial output, determinism, the refusals.
+- the `cli-*` entries drive the `starscape` binary. Entries that cook match
+  `no GPU to march on` as ctest's SKIP_REGULAR_EXPRESSION.
+
+With no qualifying device `gpu` and `cook` print the reason and exit 77, ctest's
+`SKIP_RETURN_CODE`, so the summary shows them as skipped, never as passed.
+
 | Test | Assertion | Mutation that must fail it |
 |---|---|---|
+| Pass order (`unit`) | For P = 4: the 16 passes visit every stratum exactly once; passes 0–3 hit four distinct quadrants; passes 0–7 hit each quadrant twice | qy = p₁ without the ⊕ p₀ |
+| Tile sizing (`unit`, `cook`) | `NextTileRows` doubles at most per fast dispatch and shrinks in proportion after a slow one; the GPU march reports 4 + 5 tiles for a face-64 pass at a target no dispatch misses and 1 + 56 + 5 · 64 at one every dispatch misses | size by seconds / target instead of target / seconds; never update the rows |
+| Packed layouts (`gpu`) | Packed structs have the sizes and member offsets GLSL's scalar layout gives them | drop a member from a pack function; swap two same-size members |
+| Hash and Philox on the GPU (`gpu`) | A test-only compute entry evaluates `LatticeHash` and `Philox4x32_10` on 10⁵ inputs: equal to the host's, bit for bit | truncate the hash's mixing to 32 bits in GLSL; drop one Philox round |
+| Jitter probe (`gpu`) | 24 000 queries over faces 4, 64 and 2048 and P = 1 and 4: the GPU's ray direction equals the host's pass stratum jittered by the host's Philox block to within 4 float epsilons (measured 1.3) | swap u and v, or drop the stratum offset |
+| Field probe (`gpu`) | Stylized scene, 10⁵ random points inside each galaxy's bound (including the small spiral 790 kpc away): the GPU's `GalaxySample` (densities, extinction, gas luminance) within 2 × 10⁻³ relative of the host's double evaluation at the 99.9th percentile; the significant parts agree in number, order and population | evaluate a galaxy in the scene frame instead of its local frame |
+| Device selection (`gpu`) | A device opens, names itself and round-trips a buffer; `STARSCAPE_GPU_DISABLE` refuses every device and says so; a fully capable device has no shortfall; a CPU-type device is refused unless software is allowed; each other missing requirement is named; a buffer over either limit is refused naming the limit, one within both fits | ignore the variable; drop the CPU-type branch, any one requirement's branch, or either limit comparison |
+| Progressive passes (`cook`) | A uniform single-bin ball around the observer, face 8, final: after every pass each texel's radiance and budget equal their closed forms to 10⁻⁴ | divide the sums by spp instead of n; drop the budget's scale |
+| Workgroup edge (`cook`) | The same ball at face 4, smaller than a workgroup | drop the edge test |
+| Midpoint sampling (`cook`) | A halo peaked on the observer: every texel's radiance equals the closed-form column to 10⁻³ | sample each step at its start |
+| Partial output (`cook`) | A cook stopped after a pass leaves a whole sky of the passes so far; an error from `onPass` ends the cook | return before the snapshot's stars are drawn |
+| Galaxy cap (`cook`) | 17 galaxies: an input error naming the cap | drop the cap check |
+| No GPU (`unit`, `cli-no-gpu`) | `STARSCAPE_GPU_DISABLE=1`: a cook refuses before the calibration starts; the CLI exits 1, writes no file, and stderr says `no GPU to march on: the GPU is disabled by STARSCAPE_GPU_DISABLE` | ignore the variable |
 | Euclidean counts | Infinite uniform dust-free single-bin medium: fitted slope of log N(>F) vs log F is −1.5 ± 0.05 over 3 decades | drop the s² in the point budget |
 | Energy conservation | Milky Way scene: total sky flux (points + diffuse) at budgets 500, 4000, 20 000 agrees within 3σ Poisson noise of the points | classify a step as both resolved and diffuse, or as neither |
 | Distant galaxy | Dust-free galaxy at 1 Mpc: total sky flux = Σ L · (10/d)² · 10^(−1.932) within 1 % | restore an unbounded density term |
@@ -676,7 +826,9 @@ recorded in the test's comment.
 | Straddling-step conservation | The shared step code (`AccumulatePart`, compiled in double) over a stepped ray through each Milky Way population: diffuse radiance + the expected light of the resolved points equals the all-diffuse radiance to 10⁻⁹, at thresholds 10⁻²…10⁻⁶ | drop the diffuse part beyond c_i of a straddling bin |
 | Orientation | A compact source along (0.3, 0.8, 0.52): the brightest diffuse texel (by the file's face table), the brightest preview pixels and the file's stars all lie on that direction | swap x and y when mapping a texel index to face coordinates |
 | Star-count bound | A tiny scene at `limiting_magnitude` = 25 is refused, quickly, naming the magnitude | remove the post-march bound |
-| Determinism | Quick cook with 1 thread and with 8 threads, twice in one process and in two CLI runs: byte-identical files | seed draws by thread index; mix a clock into the march's jitter seed |
+| GPU determinism (`cook`) | The same scene cooked twice in one process, and in a separate CLI run: byte-identical files | mix a clock into the march's jitter seed |
+| Thread-count determinism (`cook`) | Cooks are byte-identical on any thread count | seed draws by thread index |
+| Determinism (`cli-determinism`) | `tiny.toml` cooked with `--threads 1` and `--threads 8`: byte-identical file and preview | seed draws by thread index; mix a clock into the march's jitter seed |
 | Format round trip | Write then `Parse`: every field and payload byte equal | — |
 | Format rejection | `Parse` rejects every truncation length, each offset/size pushed past EOF, overlapping regions, bad magic/version/encoding, mip count inconsistent with face size | delete any one validation check |
 | RGB9E5 | Encode/decode matches the Vulkan reference algorithm over a logarithmic sweep of 10⁶ values plus the edge cases (0, max, negative, NaN → 0) | wrong exponent bias |
