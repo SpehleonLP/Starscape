@@ -55,9 +55,10 @@ FIELD_INLINE real ResolvedDistance(real fluxThreshold, real tv, real luminosity)
 	return sqrt(luminosity * 100.0 * kFluxAt10pc * tv / fluxThreshold);
 }
 
+// (y³ − x³)/3 factored, so a float march far from the observer does not lose the span to cancellation.
 FIELD_INLINE real CubeSpan(real x, real y)
 {
-	return (y * y * y - x * x * x) / 3.0;
+	return (y - x) * (x * x + x * y + y * y) / 3.0;
 }
 
 // The first bin whose luminosity is not below `minLuminosity`; luminosities ascend.
