@@ -49,8 +49,7 @@ include `include/kre_starscape.h` and read the file themselves.
 - Block compression of the diffuse layer (BC6H). The format reserves an encoding
   value for it.
 - Placed or near nebulae: a 40° nebula looked right in a still frame but dominated the
-  sky in a 3D viewer. The bubble rim is near gas admitted as part of the medium, checked by the
-  owner in a 3D viewer on 2026-10-15. Runtime grain, animated or time-varying skies.
+  sky in a 3D viewer. The bubble rim is near gas admitted as part of the medium. Runtime grain, animated or time-varying skies.
 - A GPU implementation. The CPU cook is the reference.
 
 ## 1. Galaxy model
@@ -228,7 +227,7 @@ dust, the bubble), so none places an object. Each enters the march exactly like
 the gas, added to `GalaxySample::gas`, in the units of a star bin's j_i; none
 touches the flux histogram, the threshold F_res, the point budgets or the star
 draws. Each is exactly zero at its default, and an empty palette takes the plain
-`colour` path, so scenes that set none of them cook as before.
+`colour` path, so scenes that set none of them cook the same as scenes without the terms.
 
 #### Palette
 
@@ -307,7 +306,8 @@ sits in front of the wall's dust.
   its own, finer colour changes. Without a palette it is the gas `colour`.
 
 The term needs a bubble, enabled dust and an enabled thin disk with
-`arm_population` (for L̄). M and W use `galaxy.seed` with their own salts.
+`arm_population` (for L̄), and it is gated by the thin disk's cutoff radius: a bubble
+placed beyond it has no rim. M and W use `galaxy.seed` with their own salts.
 
 #### Reflection
 
@@ -685,13 +685,13 @@ recorded in the test's comment.
 | Saturation default | An absent `[style]` gives `star_saturation` 1, the physical sky | a default other than 1 |
 | Saturation keeps luminance | s = 4 (so some bins clip at zero): every bin's chroma has Y = 1 to 10⁻¹²; unclipped bins sit 4× as far from white; a dust-free Milky Way ray keeps its luminance to 10⁻¹² and its point budgets exactly, while its channels spread apart | skip the renormalisation |
 | Scene keys | Range and type errors for `glow`, `colour`, `core_colour` and `star_saturation`; `glow` > 0 without `arm_population` names the key | delete any one validation |
-| Defaults are inert | The realistic scene's cook with every nebula key at its default is byte-identical to the cook before the terms existed (checked once, at landing: cook hash 32b729da for the draft cook); permanently, the Gas colour test holds the plain `colour` path. A permanent byte test would need the old code beside the new | evaluate any term at its default (e.g. `reflection` 0 still mixing `reflection_colour` into the gas) |
-| Palette luminance | Every prepared palette entry has Y = 1 to 10⁻¹²; 10⁵ random points give gas with the same luminance as the plain-`colour` gas to 10⁻¹²; with four pure, distinct entries, each is the nearest colour for at least 1% of points | drop the per-entry normalisation |
+| Defaults are inert | `cli-nebula-defaults-inert` draft-cooks a thin-disk scene with gas, dust and a bubble that sets none of the nebula keys, and the same scene with every nebula key written at its default (`palette = []`, `palette_wavelength`, `large_glow`, `large_wavelength`, `reflection`, `reflection_colour`, bubble `rim`): the sky files are byte-identical apart from the header's scene-hash field. The doctest "Every preset and a default-constructed gas and dust carry no nebula-layer light" holds `paletteCount`, `largeGlow`, `bubbleRim` and `reflection` at zero for default `Gas`, `Dust` and every preset. Separately, the Gas colour test holds the plain `colour` path | change any of those struct defaults; make the reader treat an explicit default differently from an absent key |
+| Palette luminance | Every prepared palette entry has Y = 1 to 10⁻¹²; 10⁵ random points give gas with the same luminance as the plain-`colour` gas to 10⁻¹²; with four distinct entries, each is the nearest colour for at least 1% of points | drop the per-entry normalisation |
 | Palette wraps | Three pure entries: some point blends the last into the first (red and blue, no green), and every point keeps the plain gas's luminance | wrap with `% kMaxPalette` instead of `% paletteCount` |
 | Thick disk takes no palette | A thick disk alone, with a palette and `glow` on the thin disk's gas: the gas stays exactly zero | pass the thin disk's gas into the thick disk's gas block |
 | Large-scale calibration | Uniform young disk, 2 × 10⁵ random points, at 100 pc and 20 000 pc wavelengths: Σ large-scale gas luminance / Σ young-star diffuse luminance = `large_glow` within 3% | light the term by the disk's whole midplane density instead of its young density |
-| Large-scale mean | ⟨LN⟩ = 1.006899 at seed 1 (2¹⁸ points), differs at seed 2, is the same at any wavelength; doubling the prepared mean halves the gas to 10⁻¹² | replace the mean's walk with 1 (first three checks); drop the division (last) |
-| Rim placement | 2 × 10⁴ directions at q = 0.2, 0.6, 0.64, 1.06, 1.5, 3: exactly zero rim emissivity. Along 50 radial lines through lit patches (q from 0.66 to 1.04): every line's peak lies in q ∈ [0.66, 1.04], and at least 20 of the 50 peak in [0.80, 0.90] (wisps can carry a line's peak off the shell) | centre the shell at q = 1 |
+| Large-scale mean | ⟨LN⟩ = 1.006899 at seed 1 (2¹⁸ points), differs at seed 2, is the same at any wavelength; doubling the prepared mean halves the gas to 10⁻¹² | replace the mean's walk with 1 (1.006899 and seed-differs checks); measure the mean in parsec space (wavelength-independence check); drop the division (last) |
+| Rim placement | 2 × 10⁴ directions at q = 0.2, 0.6, 0.64, 1.06, 1.5, 3: exactly zero rim emissivity. Along 50 radial lines through lit patches, at least 20 peak in q ∈ [0.80, 0.90] (wisps can carry a line's peak off the shell) | centre the shell at q = 1 |
 | Rim profile | Emissivity averaged over 4000 directions, q from 0.70 to 1.00: the peak lies in q ∈ [0.83, 0.87] | centre the shell at q = 1 |
 | Rim patchiness | Over 10⁵ points on the shell (q = 0.85), the fraction with no rim light is in [0.60, 0.80] (analytic: M = 0 where fbm/σ_fbm < 0.5, Φ(0.5) ≈ 0.69) | drop the − 0.5 offset in M |
 | Rim needs dust | A bubble with its dust disabled has exactly zero rim emissivity on the shell | drop the dust-enabled guard in the rim |

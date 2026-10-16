@@ -1,0 +1,24 @@
+# Cooks SCENE_A and SCENE_B with --draft and requires byte-identical sky files apart from the scene hash.
+foreach(side A B)
+	execute_process(COMMAND "${EXE}" cook "${SCENE_${side}}" -o "${OUT}/same-${side}.kre_starscape" --draft
+		RESULT_VARIABLE code OUTPUT_QUIET ERROR_VARIABLE errors)
+	if(NOT code EQUAL 0)
+		message(FATAL_ERROR "cook of ${SCENE_${side}} exited ${code}: ${errors}")
+	endif()
+endforeach()
+# Header bytes 8..15 hold the FNV-1a hash of the scene text (include/kre_starscape.h), which differs between
+# two texts by design; every other byte is the sky.
+file(READ "${OUT}/same-A.kre_starscape" bytesA HEX)
+file(READ "${OUT}/same-B.kre_starscape" bytesB HEX)
+string(LENGTH "${bytesA}" lengthA)
+string(LENGTH "${bytesB}" lengthB)
+if(NOT lengthA EQUAL lengthB)
+	message(FATAL_ERROR "${SCENE_A} and ${SCENE_B} cook to files of different sizes")
+endif()
+string(SUBSTRING "${bytesA}" 0 16 headA)
+string(SUBSTRING "${bytesB}" 0 16 headB)
+string(SUBSTRING "${bytesA}" 32 -1 skyA)
+string(SUBSTRING "${bytesB}" 32 -1 skyB)
+if(NOT headA STREQUAL headB OR NOT skyA STREQUAL skyB)
+	message(FATAL_ERROR "${SCENE_A} and ${SCENE_B} cook to different bytes")
+endif()

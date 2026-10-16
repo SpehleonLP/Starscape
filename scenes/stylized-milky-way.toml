@@ -24,12 +24,12 @@ seed   = 1
   [galaxy.disk.arms]
   contrast = 2.25
 
-  # 1.5 reproduces the target: its prototype ran at 2.5 before the texture's mean (0.6045 here) was divided out.
+  # 1.5 reproduces the owner-approved target; the cook divides the texture's mean out of the glow.
   [galaxy.disk.gas]
   glow = 1.5
   # The nebula layer (docs/images/2026-10-15-nebula-target.png): neighbouring clouds take different hues,
-  # and a second band of gas at giant-cloud scale fills the arms. large_glow is the spike's 1.5 times
-  # the field's mean (1.006899 at seed 1), which the cook now divides out.
+  # and a second band of gas at giant-cloud scale fills the arms. large_glow is about 1.5 times the
+  # field's mean (1.006899 at seed 1, so 1.5103), rounded to 1.51; the cook divides the mean out.
   palette            = [[1.0, 0.18, 0.32], [0.25, 1.0, 0.85], [1.0, 0.70, 0.22], [0.62, 0.30, 1.0]]
   palette_wavelength = 1500.0
   large_glow         = 1.51

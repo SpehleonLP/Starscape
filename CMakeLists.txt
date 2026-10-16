@@ -79,3 +79,8 @@ starscape_cli_test(cli-draft-stylized 0 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DI
 
 add_test(NAME cli-determinism COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:starscape> -DSCENE=${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.toml
 	-DOUT=${CLI_OUT} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/expect_same.cmake)
+
+# A scene that sets no nebula key and one that writes each at its default must cook to the same bytes.
+add_test(NAME cli-nebula-defaults-inert COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:starscape>
+	-DSCENE_A=${CMAKE_CURRENT_SOURCE_DIR}/tests/data/nebula-absent.toml -DSCENE_B=${CMAKE_CURRENT_SOURCE_DIR}/tests/data/nebula-defaults.toml
+	-DOUT=${CLI_OUT} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/expect_same_cooks.cmake)

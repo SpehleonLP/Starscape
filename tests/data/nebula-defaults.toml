@@ -1,0 +1,25 @@
+# nebula-absent.toml with every nebula-layer key written at its default.
+[output]
+face_size = 16
+target_stars = 300
+quality = "quick"
+preview = { width = 256 }
+
+[observer]
+position = [8200.0, 0.0, 20.0]
+
+[[galaxy]]
+preset = "milky-way"
+seed   = 1
+
+  [galaxy.disk.gas]
+  glow = 1.0
+  palette = []
+  palette_wavelength = 1500.0
+  large_glow = 0.0
+  large_wavelength = 100.0
+
+  [galaxy.dust]
+  reflection = 0.0
+  reflection_colour = [0.45, 0.62, 1.0]
+  bubble = { center = [8200.0, 0.0, 20.0], radius = 300.0, height = 800.0, rim = 0.0 }

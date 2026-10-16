@@ -1,0 +1,20 @@
+# Sets none of the nebula-layer keys. nebula-defaults.toml is this scene with each of them written at
+# its default, and the two must cook to the same bytes.
+[output]
+face_size = 16
+target_stars = 300
+quality = "quick"
+preview = { width = 256 }
+
+[observer]
+position = [8200.0, 0.0, 20.0]
+
+[[galaxy]]
+preset = "milky-way"
+seed   = 1
+
+  [galaxy.disk.gas]
+  glow = 1.0
+
+  [galaxy.dust]
+  bubble = { center = [8200.0, 0.0, 20.0], radius = 300.0, height = 800.0 }

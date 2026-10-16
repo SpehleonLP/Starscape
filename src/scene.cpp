@@ -303,6 +303,10 @@ Expected<void> ReadPalette(TableReader& reader, Gas& gas)
 			{
 				return reader.Fail((*rgb)[c].source(), key, "expected an array of three numbers");
 			}
+			if (std::abs(*value) > kVectorLimit)
+			{
+				return reader.Fail((*rgb)[c].source(), key, std::format("components must be within +-{}", kVectorLimit));
+			}
 			colour[int(c)] = *value;
 		}
 		if (colour.x < 0.0 || colour.y < 0.0 || colour.z < 0.0 || !(Luminance(colour) > 0.0))
@@ -450,7 +454,7 @@ Expected<void> ReadBubble(TableReader& parent, Dust& dust, Disk const& thin)
 		return reader.Fail("", "needs a positive radius and height");
 	}
 	STARSCAPE_TRY(reader.Number("rim", dust.bubbleRim, 0.0, 1000.0));
-	if (dust.bubbleRim > 0.0 && thin.armPopulation < 0)
+	if (dust.enabled && dust.bubbleRim > 0.0 && thin.armPopulation < 0)
 	{
 		return reader.Fail("rim", "rim needs the thin disk's arm_population: young stars light the wall");
 	}
