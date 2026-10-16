@@ -162,8 +162,10 @@ TEST_CASE("The march's ray directions are the host's pass strata jittered by the
 	auto directions = ProbeJitterDirection(**device, queries, seed);
 	REQUIRE(directions.has_value());
 	// The host draws in double; the GPU rounds u, v, s, t and the normalisation to float, so it cannot be bit-exact.
-	// Measured worst 1.57e-7 = 1.3 float epsilons of a unit vector; the bound is 2. A jitter or stratum error moves
-	// a ray by at least a stratum, 2^-11 of the face even at face 2048, four orders of magnitude more.
+	// Measured worst 1.57e-7 = 1.3 float epsilons of a unit vector. The bound is 4, because GPU normalize, divide and
+	// sqrt are specified only to a few ulp and another driver may round differently. A jitter or stratum error moves
+	// a ray by at least a stratum, 1/(faceSize·perAxis) of the face (2^-13 at face 2048, perAxis 4): still about
+	// three orders of magnitude more.
 	double worst = 0.0;
 	for (size_t i = 0; i < queries.size(); ++i)
 	{
@@ -180,7 +182,7 @@ TEST_CASE("The march's ray directions are the host's pass strata jittered by the
 		worst = std::max(worst, glm::length(gpu - host));
 	}
 	MESSAGE("worst direction error ", worst, " (float epsilon ", 0x1p-23, ")");
-	CHECK(worst < 2.0 * 0x1p-23);
+	CHECK(worst < 4.0 * 0x1p-23);
 }
 
 TEST_CASE("The GPU evaluates every galaxy of the stylized scene within float precision of the CPU")
