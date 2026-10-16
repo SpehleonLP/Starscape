@@ -60,11 +60,6 @@ from is branch `spike/nebula-layer` at 5d09f61 (reference only; never merge it).
 - **Mutation rule:** every new test's comment names its mutation. Apply the
   mutation by hand, watch the test go red, and revert, *before* committing the
   task. Record "mutation checked" in the commit message.
-- **Machine sharing:** the kre_mesh-texturing session benchmarks on this
-  machine. Builds and unit tests are light. For any cook other than `--draft`,
-  first send `STARSCAPE BUSY` to `uds:/run/user/1000/cc-socks/3006841.sock`, and
-  send `STARSCAPE IDLE` after. If that session has sent `BENCH START` without a
-  `BENCH DONE`, wait.
 
 ## Review Focus
 
@@ -1344,7 +1339,7 @@ git commit -m "Scenes: the stylized sky takes the nebula layer; new terms pinned
 
 - [ ] **Step 1: Render the stylized scene beside the target**
 
-Send `STARSCAPE BUSY` first (see Global Constraints). Then:
+Run:
 
 ```bash
 Build/starscape cook scenes/stylized-milky-way.toml -o Build/accept/stylized.kre_starscape --quick --width 2048 --preview Build/accept/stylized.hdr
@@ -1390,7 +1385,7 @@ for im, label in ((old, 'target (spike)'), (new, 'stylized-milky-way.toml')):
 canvas = Image.new('RGB', (new.width, new.height * 2)); canvas.paste(old, (0, 0)); canvas.paste(new, (0, new.height)); canvas.save(dest)
 ```
 
-Send `STARSCAPE IDLE`. Print `UNVERIFIED-VISUAL: Build/accept/compare.png awaits the owner`
+Print `UNVERIFIED-VISUAL: Build/accept/compare.png awaits the owner`
 and hand the image and `Build/accept/stylized.hdr` to the owner, for two checks:
 1. Does it match the target?
 2. In Blender, with the HDR as the world, does the rim read as part of the sky?
