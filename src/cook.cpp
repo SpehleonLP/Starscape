@@ -120,6 +120,13 @@ glm::dvec3 SampleTexelDirection(uint32_t faceSize, uint32_t texel, RandomStream&
 	}
 }
 
+int NextTileRows(int rows, double seconds, int faceSize)
+{
+	constexpr double kTarget = 0.25;
+	double const scale = seconds > 0.0 ? std::min(2.0, kTarget / seconds) : 2.0;
+	return std::clamp(int(double(rows) * scale), 1, faceSize);
+}
+
 FluxHistogram CalibrationHistogram(PreparedScene const& scene, MarchParams const& params, uint32_t faceSize, unsigned threads)
 {
 	// One partial histogram per texel row, merged in row order, keeps the floating-point sum
@@ -185,6 +192,12 @@ public:
 		return {};
 	}
 
+	// ParallelFor treats 0 threads as one, so the name reports what actually runs.
+	std::string Name() const override
+	{
+		return std::format("CPU, {} threads", std::max(1u, m_threads));
+	}
+
 private:
 	PreparedScene const&        m_prepared;
 	MarchParams                 m_params;
@@ -219,7 +232,8 @@ Expected<Cooked> Snapshot(Scene const& scene, PreparedScene const& prepared, Mar
 	// perAxis² / passes.
 	double const scale = double(perAxis * perAxis) / double(passes);
 	cooked.diffuse.resize(texels);
-	std::vector<std::array<float, kBins>> budget(texels);
+	cooked.budget.resize(texels);
+	std::vector<std::array<float, kBins>>& budget = cooked.budget;
 	for (uint32_t texel = 0; texel < texels; ++texel)
 	{
 		cooked.diffuse[texel] = sums.radiance[texel] * scale;
@@ -350,9 +364,7 @@ Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 		}
 	}
 	PassMarcher& marcher = gpuMarcher ? *gpuMarcher : static_cast<PassMarcher&>(cpu);
-	// ParallelFor treats 0 threads as one, so the name reports what actually runs. Task 7 replaces this with
-	// the marcher's own name.
-	std::string const deviceName = gpuMarcher ? std::string("GPU") : std::format("CPU, {} threads", std::max(1u, options.threads));
+	std::string const deviceName = marcher.Name();
 	// 1. The flux threshold: given, or the one that leaves `target_stars` resolved.
 	double fluxThreshold = 0.0;
 	bool budgetUnreachable = false;

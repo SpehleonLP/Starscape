@@ -1,0 +1,190 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_GOOGLE_include_directive : require
+#include "field/step.glsl.h"
+#include "philox.glsl"
+#include "face.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+const int kMaxGalaxies = 16;
+
+// Each galaxy's frame: the observer in galaxy-local coordinates, computed in double on the host, so a galaxy
+// 780 kpc away never puts 780 kpc into float arithmetic beyond this one rounding.
+struct GalaxyFrame
+{
+	mat3  toLocal;
+	vec3  localOrigin;
+	float boundRadius;
+};
+
+layout(scalar, set = 0, binding = 0) readonly buffer Galaxies { Galaxy galaxies[]; };
+layout(scalar, set = 0, binding = 1) readonly buffer Frames { GalaxyFrame frames[]; };
+layout(scalar, set = 0, binding = 2) readonly buffer Populations { PopulationTable populations[]; };
+// One face's sums: per texel, weighted radiance rgb then kBins budgets.
+layout(scalar, set = 0, binding = 3) buffer Sums { float sums[]; };
+
+layout(push_constant, scalar) uniform Pass
+{
+	mat3  skyToScene;
+	uint  faceSize;
+	uint  face;
+	uint  rowBegin;
+	uint  rowEnd;
+	uint  stratumX;
+	uint  stratumY;
+	uint  perAxis;
+	uint  galaxyCount;
+	uint  seedLo;
+	uint  seedHi;
+	float fluxThreshold;
+	float weight;
+	float alpha;
+	float dsMin;
+	float dsMax;
+	float sMin;
+} pass;
+
+const uint kSumsPerTexel = 3u + uint(kBins);
+
+void main()
+{
+	const uint x = gl_GlobalInvocationID.x;
+	const uint y = pass.rowBegin + gl_GlobalInvocationID.y;
+	if (x >= pass.faceSize || y >= pass.rowEnd)
+	{
+		return;
+	}
+	const uint texel = (pass.face * pass.faceSize + y) * pass.faceSize + x;
+	const uint stratum = pass.stratumY * pass.perAxis + pass.stratumX;
+	// RandomStream(seed, Jitter, texel, 0, 0, stratum): purpose Jitter = 1 in the top byte of word 2.
+	const uvec4 block = Philox4x32_10(uvec4(texel, 0u, 1u << 24, stratum), uvec2(pass.seedLo, pass.seedHi));
+	const float u = WordsToUnit(block.x, block.y);
+	const float v = WordsToUnit(block.z, block.w);
+	const float s = (float(x) + (float(pass.stratumX) + u) / float(pass.perAxis)) / float(pass.faceSize);
+	const float t = (float(y) + (float(pass.stratumY) + v) / float(pass.perAxis)) / float(pass.faceSize);
+	const vec3 dirScene = pass.skyToScene * normalize(FaceToDir(pass.face, s, t));
+	const float solid = TexelSolidAngle(pass.faceSize, x, y) * pass.weight;
+
+	RayResult result;
+	result.radiance = vec3(0.0);
+	result.resolvedRadiance = vec3(0.0);
+	for (int bin = 0; bin < kBins; ++bin)
+	{
+		result.budget[bin] = 0.0;
+	}
+
+	// The ray's stretches inside each galaxy's bound, sorted and merged as RayIntervals does.
+	vec3 dirLocal[kMaxGalaxies];
+	float begins[kMaxGalaxies];
+	float ends[kMaxGalaxies];
+	int intervals = 0;
+	for (uint g = 0u; g < pass.galaxyCount; ++g)
+	{
+		dirLocal[g] = frames[g].toLocal * dirScene;
+		const vec3 o = frames[g].localOrigin;
+		const float b = dot(o, dirLocal[g]);
+		const float c = dot(o, o) - frames[g].boundRadius * frames[g].boundRadius;
+		const float discriminant = b * b - c;
+		if (discriminant <= 0.0)
+		{
+			continue;
+		}
+		const float root = sqrt(discriminant);
+		const float begin = max(-b - root, pass.sMin);
+		const float end = -b + root;
+		if (end > begin)
+		{
+			int k = intervals;
+			while (k > 0 && begins[k - 1] > begin)
+			{
+				begins[k] = begins[k - 1];
+				ends[k] = ends[k - 1];
+				k -= 1;
+			}
+			begins[k] = begin;
+			ends[k] = end;
+			intervals += 1;
+		}
+	}
+	int merged = 0;
+	for (int i = 0; i < intervals; ++i)
+	{
+		if (merged > 0 && begins[i] <= ends[merged - 1])
+		{
+			ends[merged - 1] = max(ends[merged - 1], ends[i]);
+		}
+		else
+		{
+			begins[merged] = begins[i];
+			ends[merged] = ends[i];
+			merged += 1;
+		}
+	}
+
+	float depth = 0.0;
+	Contribution parts[kMaxGalaxies * 6];
+	for (int i = 0; i < merged; ++i)
+	{
+		// Positions are measured from the interval's start in each galaxy's frame, so float rounding of the
+		// observer's offset shifts the whole stretch by a fraction of a parsec instead of jittering each step.
+		vec3 anchor[kMaxGalaxies];
+		for (uint g = 0u; g < pass.galaxyCount; ++g)
+		{
+			anchor[g] = frames[g].localOrigin + begins[i] * dirLocal[g];
+		}
+		float sNow = begins[i];
+		while (sNow < ends[i])
+		{
+			const float remaining = ends[i] - sNow;
+			const float ds = min(clamp(pass.alpha * sNow, pass.dsMin, pass.dsMax), remaining);
+			const float mid = sNow + 0.5 * ds;
+			float extinction = 0.0;
+			vec3 gas = vec3(0.0);
+			int partCount = 0;
+			// Every galaxy's extinction is summed before any part sees the step's transmittance, as on the CPU.
+			for (uint g = 0u; g < pass.galaxyCount; ++g)
+			{
+				const vec3 p = anchor[g] + (mid - begins[i]) * dirLocal[g];
+				if (dot(p, p) > frames[g].boundRadius * frames[g].boundRadius)
+				{
+					continue;
+				}
+				GalaxySample here;
+				EvaluateLocal(galaxies[g], p, here);
+				for (int k = 0; k < here.count; ++k)
+				{
+					parts[partCount] = here.parts[k];
+					partCount += 1;
+				}
+				extinction += here.extinction;
+				gas += here.gas;
+			}
+			const vec3 transmittance = TransmittanceForDepth(depth + 0.5 * extinction * ds);
+			result.radiance += (pass.weight * ds) * (transmittance * gas);
+			for (int k = 0; k < partCount; ++k)
+			{
+				AccumulatePart(populations[parts[k].population], parts[k].density, pass.fluxThreshold, sNow, sNow + ds, ds,
+					transmittance, pass.weight, solid, result);
+			}
+			depth += extinction * ds;
+			const float next = ds == remaining ? ends[i] : sNow + ds;
+			// A step too small to move the float position would loop forever; end the stretch instead.
+			if (next <= sNow)
+			{
+				break;
+			}
+			sNow = next;
+		}
+	}
+
+	const uint base = (y * pass.faceSize + x) * kSumsPerTexel;
+	sums[base] += result.radiance.x;
+	sums[base + 1u] += result.radiance.y;
+	sums[base + 2u] += result.radiance.z;
+	for (int bin = 0; bin < kBins; ++bin)
+	{
+		sums[base + 3u + uint(bin)] += result.budget[bin];
+	}
+}

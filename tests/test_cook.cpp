@@ -142,7 +142,7 @@ TEST_CASE("Energy is conserved whatever the star budget")
 	for (uint32_t const target : {500u, 4000u, 20000u})
 	{
 		scene.output.targetStars = target;
-		cooks.push_back(Cook(scene, {.threads = Threads()}).value());
+		cooks.push_back(Cook(scene, {.threads = Threads(), .device = DeviceChoice::Cpu}).value());
 	}
 	CHECK(double(cooks[1].stars.size()) == doctest::Approx(4000.0).epsilon(0.25));
 	for (Cooked const& cooked : cooks)
@@ -167,7 +167,7 @@ TEST_CASE("From inside the disk the band is diffuse and the points are nearly un
 	scene.output.faceSize = 64;
 	scene.output.limitingMagnitude.reset();
 	scene.output.targetStars = 20000;
-	Cooked const cooked = Cook(scene, {.threads = Threads()}).value();
+	Cooked const cooked = Cook(scene, {.threads = Threads(), .device = DeviceChoice::Cpu}).value();
 
 	double planeRadiance = 0.0;
 	double planeAngle = 0.0;
@@ -214,7 +214,7 @@ TEST_CASE("Observer at the core")
 	Scene scene = MilkyWayScene({0.0, 0.0, 0.0});
 	scene.output.limitingMagnitude.reset();
 	scene.output.targetStars = 2000;
-	Cooked const cooked = Cook(scene, {.threads = Threads()}).value();
+	Cooked const cooked = Cook(scene, {.threads = Threads(), .device = DeviceChoice::Cpu}).value();
 	CHECK(cooked.stars.size() >= 1000);
 	CHECK(cooked.stars.size() <= 3000);
 	for (glm::dvec3 const& radiance : cooked.diffuse)
@@ -234,7 +234,7 @@ TEST_CASE("Unreachable budget")
 	scene.galaxies.push_back(tiny);
 	scene.output.limitingMagnitude.reset();
 	scene.output.targetStars = 4000;
-	Cooked const cooked = Cook(scene, {.threads = Threads()}).value();
+	Cooked const cooked = Cook(scene, {.threads = Threads(), .device = DeviceChoice::Cpu}).value();
 	CHECK(cooked.stats.budgetUnreachable);
 	CHECK(cooked.stars.size() > 0);
 	CHECK(cooked.stars.size() < 2000);
@@ -248,7 +248,7 @@ TEST_CASE("A source in a known direction lands in that direction in the file and
 	glm::dvec3 const dir = glm::normalize(glm::dvec3(0.3, 0.8, 0.52));   // off every axis and diagonal
 
 	// Everything diffuse: the lump is a smudge in one or two texels.
-	Cooked const smudge = Cook(LumpScene(dir, -30.0), {.threads = Threads()}).value();
+	Cooked const smudge = Cook(LumpScene(dir, -30.0), {.threads = Threads(), .device = DeviceChoice::Cpu}).value();
 	CHECK(smudge.stars.empty());
 	std::vector<uint8_t> const smudgeBytes = BuildFile(smudge, 0);
 	kre_starscape::View smudgeView;
@@ -280,7 +280,7 @@ TEST_CASE("A source in a known direction lands in that direction in the file and
 	CHECK(AngleDegrees(BrightestPixelDirection(diffusePreview), dir) < 1.5 * texelDegrees);
 
 	// Everything a point: the stars sit on the direction, in the file and in the splats.
-	Cooked const stars = Cook(LumpScene(dir, 30.0), {.threads = Threads()}).value();
+	Cooked const stars = Cook(LumpScene(dir, 30.0), {.threads = Threads(), .device = DeviceChoice::Cpu}).value();
 	REQUIRE(stars.stars.size() > 10);
 	std::vector<uint8_t> const starBytes = BuildFile(stars, 0);
 	kre_starscape::View starView;
@@ -301,7 +301,7 @@ TEST_CASE("A limiting magnitude that resolves too many stars is rejected up fron
 	scene.output.limitingMagnitude = 25.0;
 	int const population = AddSingleBinPopulation(scene, 12);
 	scene.galaxies.push_back(UniformBall(0.01, 2000.0, population, {0.0, 0.0, 0.0}));   // about 3e8 stars
-	Expected<Cooked> const cooked = Cook(scene, {.threads = Threads()});
+	Expected<Cooked> const cooked = Cook(scene, {.threads = Threads(), .device = DeviceChoice::Cpu});
 	REQUIRE_FALSE(cooked.has_value());
 	CHECK(cooked.error().kind == Error::Kind::Input);
 	CHECK(cooked.error().message.find("magnitude 25.00") != std::string::npos);
@@ -374,12 +374,14 @@ Scene SmallFinalScene()
 TEST_CASE("Progressive passes average the same rays as one batch")
 {
 	// Mutation: scaling the sums by S² instead of S²/n leaves a partial cook n/S² too dark; the full cook still
-	// matches, so the partial check is what reddens.
+	// matches, so the partial check is what reddens. Dropping the scale on the budget alone leaves the radiance
+	// right and the stars drawn from a sum, which the budget check reddens.
 	Scene const scene = SmallFinalScene();
 	PreparedScene const prepared = PrepareScene(scene);
 	MarchParams const params = ParamsFor(Quality::Final);
 	std::vector<Cooked> snapshots;
 	CookOptions options;
+	options.device = DeviceChoice::Cpu;
 	options.threads = 4;
 	options.onPass = [&](Cooked const& cooked, int pass, int passes) -> Expected<void>
 	{
@@ -412,7 +414,9 @@ TEST_CASE("Progressive passes average the same rays as one batch")
 		CHECK(full.x == doctest::Approx(batch.radiance.x).epsilon(1e-12));
 		CHECK(full.y == doctest::Approx(batch.radiance.y).epsilon(1e-12));
 		CHECK(full.z == doctest::Approx(batch.radiance.z).epsilon(1e-12));
-		// After four passes, the mean of the first four strata in pass order.
+		// After four passes, the mean of the first four strata in pass order. The budget needs the texel's
+		// solid angle, which the radiance does not.
+		double const texelSolid = kre_starscape::TexelSolidAngle(size, texel % size, (texel / size) % size);
 		RayResult four;
 		for (int pass = 0; pass < 4; ++pass)
 		{
@@ -420,9 +424,13 @@ TEST_CASE("Progressive passes average the same rays as one batch")
 			RandomStream at(scene.output.seed, Purpose::Jitter, texel, 0, 0, uint32_t(4 * s.y + s.x));
 			double const u = at.NextDouble();
 			double const v = at.NextDouble();
-			MarchRay(prepared, params, TexelJitterDirection(size, texel, 4, s, u, v), cooked->fluxThreshold, solid, 1.0 / 4.0, four);
+			MarchRay(prepared, params, TexelJitterDirection(size, texel, 4, s, u, v), cooked->fluxThreshold, texelSolid / 4.0, 1.0 / 4.0, four);
 		}
 		CHECK(snapshots[3].diffuse[texel].y == doctest::Approx(four.radiance.y).epsilon(1e-12));
+		// The single bin's budget: float sums, so float precision.
+		REQUIRE(snapshots[3].budget.size() == 6 * size * size);
+		REQUIRE(four.budget[12] > 0.0);
+		CHECK(double(snapshots[3].budget[texel][12]) == doctest::Approx(four.budget[12]).epsilon(1e-5));
 	}
 }
 
@@ -431,6 +439,7 @@ TEST_CASE("A cook stopped after a pass leaves a whole sky of the passes so far")
 	// Mutation: returning before the stars are drawn for the snapshot leaves the stopped cook without stars.
 	Scene const scene = SmallFinalScene();
 	CookOptions options;
+	options.device = DeviceChoice::Cpu;
 	options.threads = 2;
 	options.stopAfterPasses = 4;
 	int calls = 0;
@@ -454,6 +463,7 @@ TEST_CASE("An error from onPass ends the cook")
 	// Mutation: ignoring onPass's result keeps cooking after a failed write.
 	Scene const scene = SmallFinalScene();
 	CookOptions options;
+	options.device = DeviceChoice::Cpu;
 	int calls = 0;
 	options.onPass = [&](Cooked const&, int, int) -> Expected<void>
 	{
@@ -464,4 +474,14 @@ TEST_CASE("An error from onPass ends the cook")
 	REQUIRE_FALSE(result.has_value());
 	CHECK(result.error().message == "disk full");
 	CHECK(calls == 1);
+}
+
+TEST_CASE("Tiles grow toward a quarter second and shrink after a slow one")
+{
+	// Mutation: sizing by seconds / target instead of target / seconds grows tiles after a slow dispatch.
+	CHECK(NextTileRows(8, 0.0625, 512) == 16);    // 4× too fast, but growth is capped at doubling
+	CHECK(NextTileRows(32, 4.0, 512) == 2);
+	CHECK(NextTileRows(8, 0.0, 512) == 16);     // too fast to time: double, never divide by zero
+	CHECK(NextTileRows(400, 0.01, 512) == 512);   // never past the face
+	CHECK(NextTileRows(1, 100.0, 512) == 1);      // never below one row
 }

@@ -1,7 +1,8 @@
 # Cooks SCENE with --threads 1 and --threads 8 and requires byte-identical sky and preview files.
+# Pinned to the CPU: the GPU march has no threads, so under Auto this would test only the star draws.
 foreach(threads 1 8)
 	execute_process(COMMAND "${EXE}" cook "${SCENE}" -o "${OUT}/det${threads}.kre_starscape"
-		--preview "${OUT}/det${threads}.hdr" --threads ${threads} RESULT_VARIABLE code OUTPUT_QUIET)
+		--preview "${OUT}/det${threads}.hdr" --threads ${threads} --device cpu RESULT_VARIABLE code OUTPUT_QUIET)
 	if(NOT code EQUAL 0)
 		message(FATAL_ERROR "cook with ${threads} threads exited ${code}")
 	endif()

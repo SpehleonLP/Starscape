@@ -147,8 +147,8 @@ TEST_CASE("Cooks are byte-identical on any thread count")
 {
 	// Mutation: seeding draws by thread index reddens this test.
 	Scene const scene = MilkyWayScene({8200.0, 0.0, 20.0});   // limiting magnitude 6, face 16, quick
-	std::vector<uint8_t> const one = BuildFile(Cook(scene, {.threads = 1}).value(), scene.hash);
-	std::vector<uint8_t> const many = BuildFile(Cook(scene, {.threads = 8}).value(), scene.hash);
+	std::vector<uint8_t> const one = BuildFile(Cook(scene, {.threads = 1, .device = DeviceChoice::Cpu}).value(), scene.hash);
+	std::vector<uint8_t> const many = BuildFile(Cook(scene, {.threads = 8, .device = DeviceChoice::Cpu}).value(), scene.hash);
 	CHECK(one == many);
 }
 

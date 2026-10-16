@@ -39,6 +39,8 @@ struct Cooked
 	CookStats               stats;
 	int                     passes = 0;   // how many passes the snapshot holds
 	std::string             device;       // what marched, e.g. "CPU, 8 threads"
+	// Expected resolved stars per texel and bin, the mean of the passes so far: what the stars were drawn from.
+	std::vector<std::array<float, kBins>> budget;
 };
 
 enum class DeviceChoice { Auto, Gpu, Cpu };
@@ -95,7 +97,12 @@ class PassMarcher
 public:
 	virtual ~PassMarcher() = default;
 	virtual Expected<void> MarchPass(PassSpec const& spec, PassSums& sums) = 0;
+	// What marches, for the cook's last log line: a file's bytes depend on it.
+	virtual std::string Name() const = 0;
 };
+
+// The next dispatch's rows: scaled toward 0.25 s, at most doubling, clamped to [1, faceSize].
+int NextTileRows(int rows, double seconds, int faceSize);
 
 // An input error when the threshold would resolve more than kMaxStars points.
 Expected<Cooked> Cook(Scene const& scene, CookOptions const& options);
