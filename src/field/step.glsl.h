@@ -9,7 +9,7 @@ namespace starscape
 {
 #endif
 
-const int kBins = 24;
+FIELD_CONST int kBins = 24;
 
 // What the march reads per step, derived once per population.
 struct PopulationTable
@@ -39,9 +39,6 @@ FIELD_INLINE real3 TransmittanceForDepth(real magnitudes)
 	return real3(exp(-0.75 * tau), exp(-1.00 * tau), exp(-1.32 * tau));
 }
 
-// Density and transmittance are constant over a step but distance is integrated exactly across it:
-// deciding resolved-or-diffuse once per step at its midpoint quantised the boundary to the step grid,
-// which showed up as +-9% ripples in star counts.
 // Lowest luminosity resolved at distance x: L T_V 100 C / x^2 >= F_res.
 FIELD_INLINE real MinResolvedLuminosity(real fluxThreshold, real tv, real x)
 {
@@ -75,7 +72,8 @@ FIELD_INLINE int FirstResolvedBin(IN(PopulationTable) population, real minLumino
 }
 
 // One population's stars over a step [a, b]: density and transmittance constant, distance integrated
-// exactly, so the resolved-or-diffuse split is not quantised to the step grid. `ds` is passed rather than
+// exactly, so the resolved-or-diffuse split is not quantised to the step grid (a split decided at each step's
+// midpoint showed as ±9% ripples in star counts). `ds` is passed rather than
 // computed as b − a, which can differ from the walk's step in the last bit and would move the CPU's bytes.
 FIELD_INLINE void AccumulatePart(IN(PopulationTable) population, real density, real fluxThreshold, real a, real b,
 	real ds, real3 transmittance, real weight, real sampleSolidAngle, INOUT(RayResult) result)

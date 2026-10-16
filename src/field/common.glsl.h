@@ -21,6 +21,8 @@
 #define ZEROED {}
 #define DEFAULT(value) = value
 #define FIELD_INLINE inline
+// Namespace-scope constants are read by inline functions in many TUs: inline constexpr gives them one definition.
+#define FIELD_CONST inline constexpr
 
 // 64-bit constants are written with a `ul` suffix, the one spelling both languages accept: glslang lexes a
 // macro argument before pasting, so an unsuffixed 64-bit hex literal fails there, and `ull` is not GLSL.
@@ -80,6 +82,7 @@ inline constexpr double kHugeReal = HUGE_VAL;
 #define ZEROED
 #define DEFAULT(value)
 #define FIELD_INLINE
+#define FIELD_CONST const
 #define real float
 #define real3 vec3
 #define real3x3 mat3
@@ -95,7 +98,7 @@ real Hypot(real x, real y)
 }
 
 // Large enough that no luminosity reaches it; GLSL has no portable constant infinity.
-const real kHugeReal = 3.0e38;
+FIELD_CONST real kHugeReal = 3.0e38;
 
 #endif
 
@@ -105,7 +108,7 @@ namespace starscape
 #endif
 
 // Moments measured over 4·10⁵ random points. Fbm: σ 0.167 at 4 octaves, 0.159 at 6.
-const real kFbmSigma = 0.163;
+FIELD_CONST real kFbmSigma = 0.163;
 
 FIELD_INLINE real Luminance(real3 rgb)
 {

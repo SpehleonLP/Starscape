@@ -66,12 +66,7 @@ FIELD_INLINE real Corner(int64_t ix, int64_t iy, int64_t iz, real fx, real fy, r
 // Gradient noise is zero on its lattice, so its variance sags on lattice planes, and doubling keeps
 // z = 0 on one at every octave: a galaxy's midplane, where most of its dust is, would be the least
 // structured place in it. An irrational shift per octave moves every octave off the lattice.
-// C++ makes it inline constexpr: the inline Fbm and RidgedFbm odr-use it, so one definition must serve every TU.
-#ifdef __cplusplus
-inline constexpr glm::dvec3 kOctaveShift(0.5497004779, 0.6710436067, 0.8191725134);
-#else
-const real3 kOctaveShift = real3(0.5497004779, 0.6710436067, 0.8191725134);
-#endif
+FIELD_CONST real3 kOctaveShift = real3(0.5497004779, 0.6710436067, 0.8191725134);
 
 // Perlin gradient noise: roughly in [-1, 1], exactly zero on integer lattice points.
 FIELD_INLINE real GradientNoise(real3 p, uint64_t seed)

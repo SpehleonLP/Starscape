@@ -24,7 +24,7 @@ struct Arms
 };
 
 // The most colours a gas palette takes: enough for any ramp, small enough to live in a fixed array.
-const int kMaxPalette = 8;
+FIELD_CONST int kMaxPalette = 8;
 
 // Gas lit by a disk's young stars. Its light is `glow` times theirs, averaged over space: it gathers where
 // they cluster and onto the dust's filaments, and the dust's bubble clears it too.
@@ -146,31 +146,31 @@ struct GalaxySample
 
 // Flux of a 1 L_V☉ source at 10 pc in magnitude-0 units: 10^(−0.4 × 4.83), the Sun's M_V. Here rather than
 // with the march step because the gas's light is scaled by it too.
-const real kFluxAt10pc = 0.01169499;
+FIELD_CONST real kFluxAt10pc = 0.01169499;
 
 // Salts so the dust filaments do not trace the same noise as the arm clumps.
-const uint64_t kDustNoiseSalt = 0xD057D057D057D057ul;
+FIELD_CONST uint64_t kDustNoiseSalt = 0xD057D057D057D057ul;
 
 // Moments measured over 4·10⁵ random points. Ridged fbm at 6 octaves (Fbm's σ is kFbmSigma).
-const real kRidgedMean = 0.6307;
-const real kRidgedSigma = 0.1339;
-const int kDustOctaves = 6;
-const int kAssociationOctaves = 3;
-const uint64_t kAssociationNoiseSalt = 0xA550C1A7E5ul;
+FIELD_CONST real kRidgedMean = 0.6307;
+FIELD_CONST real kRidgedSigma = 0.1339;
+FIELD_CONST int kDustOctaves = 6;
+FIELD_CONST int kAssociationOctaves = 3;
+FIELD_CONST uint64_t kAssociationNoiseSalt = 0xA550C1A7E5ul;
 
 // The gas texture's noise. Fixed rather than scene keys: the owner-approved look was tuned on exactly these.
-const uint64_t kGasClumpSalt = 0x6A5ul;
-const uint64_t kGasWispSalt = 0x6A6ul;
-const real kGasClumpWavelength = 40.0;   // parsecs: a bright nebula's core
-const real kGasWispWavelength = 25.0;
-const int kGasOctaves = 5;
+FIELD_CONST uint64_t kGasClumpSalt = 0x6A5ul;
+FIELD_CONST uint64_t kGasWispSalt = 0x6A6ul;
+FIELD_CONST real kGasClumpWavelength = 40.0;   // parsecs: a bright nebula's core
+FIELD_CONST real kGasWispWavelength = 25.0;
+FIELD_CONST int kGasOctaves = 5;
 // The palette's hue field. Fixed rather than a scene key: the owner-approved nebula look was tuned on it.
-const uint64_t kPaletteSalt = 0x9A1E77Eul;
-const uint64_t kLargeGasSalt = 0xB16B16ul;
-const int kLargeGasOctaves = 4;
+FIELD_CONST uint64_t kPaletteSalt = 0x9A1E77Eul;
+FIELD_CONST uint64_t kLargeGasSalt = 0xB16B16ul;
+FIELD_CONST int kLargeGasOctaves = 4;
 // The rim's patches and wisps. Fixed rather than scene keys: the owner-approved nebula look was tuned on them.
-const uint64_t kRimMaskSalt = 0x81B1ul;
-const uint64_t kRimWispSalt = 0x81B0ul;
+FIELD_CONST uint64_t kRimMaskSalt = 0x81B1ul;
+FIELD_CONST uint64_t kRimWispSalt = 0x81B0ul;
 
 // Written as d * π / 180, not d * (π / 180): the CPU reference's bytes were cooked with this rounding.
 FIELD_INLINE real Radians(real d)
