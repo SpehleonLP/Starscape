@@ -33,7 +33,9 @@ TEST_CASE("Packed structs have the sizes and member offsets GLSL's scalar layout
 {
 	// The numbers come from glslangValidator reflection of `layout(scalar) buffer { Galaxy g[]; }` and
 	// `{ PopulationTable t[]; }` (spirv-dis: OpDecorate ArrayStride, OpMemberDecorate Offset), 2026-10-16.
-	// Mutation: dropping `w.Align(4)` or a member from PackGas/PackDust moves the size off 624.
+	// Mutation: dropping a member from PackGas/PackDust moves the size off 624; swapping density and
+	// scaleLength in PackDisk, or extinction and scaleLength in PackDust, moves a sentinel.
+	// Sentinels sit at the reflected offsets so a same-size swap is caught, not only a dropped member.
 	constexpr size_t kGalaxyStride = 624;
 	constexpr size_t kPopulationStride = 780;
 	Galaxy galaxy;
@@ -43,6 +45,10 @@ TEST_CASE("Packed structs have the sizes and member offsets GLSL's scalar layout
 	galaxy.bulge.population = 0x0A0B0C0D;
 	galaxy.halo.population = 0x0E0F1011;
 	galaxy.dust.reflection = 2.5;
+	galaxy.disk.density = 0.75;
+	galaxy.disk.scaleLength = 1.25;
+	galaxy.dust.extinction = 3.5;
+	galaxy.dust.scaleLength = 4.5;
 	ScalarWriter one;
 	PackGalaxy(one, galaxy);
 	CHECK(one.Bytes().size() == kGalaxyStride);
@@ -66,11 +72,37 @@ TEST_CASE("Packed structs have the sizes and member offsets GLSL's scalar layout
 	float reflection;
 	std::memcpy(&reflection, one.Bytes().data() + 548 + 60, sizeof reflection);
 	CHECK(reflection == 2.5f);
+	auto real = [&](size_t offset)
+	{
+		float value;
+		std::memcpy(&value, one.Bytes().data() + offset, sizeof value);
+		return value;
+	};
+	CHECK(real(32 + 4) == 0.75f);    // disk.density
+	CHECK(real(32 + 8) == 1.25f);    // disk.scaleLength
+	CHECK(real(548 + 4) == 3.5f);    // dust.extinction
+	CHECK(real(548 + 8) == 4.5f);    // dust.scaleLength
 
 	ScalarWriter table;
 	PopulationTable population;
+	population.chroma[1] = glm::dvec3(0.5, 0.25, 0.125);
+	population.fraction[1] = 0.375;
+	population.luminosity[1] = 6.5;
+	population.lightBelow[1] = glm::dvec3(7.5, 8.5, 9.5);
 	PackPopulation(table, population);
 	CHECK(table.Bytes().size() == kPopulationStride);
+	// Element 1 of each array at the reflected offsets (chroma@0, fraction@288, luminosity@384,
+	// lightBelow@480): swapping two of PackPopulation's loops moves them.
+	auto entry = [&](size_t offset)
+	{
+		float value;
+		std::memcpy(&value, table.Bytes().data() + offset, sizeof value);
+		return value;
+	};
+	CHECK(entry(12 + 4) == 0.25f);
+	CHECK(entry(288 + 4) == 0.375f);
+	CHECK(entry(384 + 4) == 6.5f);
+	CHECK(entry(480 + 12 + 8) == 9.5f);
 }
 
 TEST_CASE("The GPU's lattice hash and Philox equal the CPU's, bit for bit")

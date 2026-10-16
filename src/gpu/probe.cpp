@@ -38,10 +38,15 @@ public:
 	Run(Run const&) = delete;
 	Run& operator=(Run const&) = delete;
 
-	// Galaxy bytes, input words and output words; none may be empty (a zero-size buffer is invalid).
+	// Galaxy bytes (empty for the hash and Philox modes), input words and output words.
 	Expected<void> Execute(uint32_t mode, uint32_t count, uint64_t seed, std::span<uint8_t const> galaxy, std::span<uint32_t const> inputs,
 		size_t outputWords)
 	{
+		// A zero-size output buffer is invalid Vulkan usage, and a dispatch over nothing proves nothing.
+		if (count == 0 || inputs.empty() || outputWords == 0)
+		{
+			return std::unexpected(Error{Error::Kind::Input, "GPU probe: no inputs"});
+		}
 		std::array<size_t, 3> const sizes{std::max<size_t>(galaxy.size(), 16), std::max<size_t>(inputs.size_bytes(), 16), outputWords * sizeof(uint32_t)};
 		for (size_t i = 0; i < sizes.size(); ++i)
 		{
@@ -49,7 +54,10 @@ public:
 			m_buffers[i] = buffer;
 			std::memset(buffer.mapped, 0, sizes[i]);
 		}
-		std::memcpy(m_buffers[0].mapped, galaxy.data(), galaxy.size());
+		if (!galaxy.empty())
+		{
+			std::memcpy(m_buffers[0].mapped, galaxy.data(), galaxy.size());
+		}
 		std::memcpy(m_buffers[1].mapped, inputs.data(), inputs.size_bytes());
 
 		STARSCAPE_TRY_ASSIGN(setLayout, m_device.CreateDescriptorSetLayout(3));

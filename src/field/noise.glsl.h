@@ -136,9 +136,9 @@ struct NoisePoint
 NoisePoint NoiseStart(vec3 p, float wavelength)
 {
 	// Splitting off whole wavelengths before dividing keeps the remainder's error at float's resolution of
-	// one wavelength, wherever p is: c·λ is an integer below 2^24, so p − c·λ rounds at most once.
+	// one wavelength, wherever p is: fma rounds c·λ − p once, so the remainder carries only p's own rounding.
 	const vec3 c = floor(p / wavelength);
-	const vec3 f = (p - c * wavelength) / wavelength + kOctaveShift;
+	const vec3 f = fma(-c, vec3(wavelength), p) / wavelength + kOctaveShift;
 	const vec3 whole = floor(f);
 	return NoisePoint(i64vec3(c) + i64vec3(whole), f - whole);
 }

@@ -33,7 +33,6 @@ void PackGas(ScalarWriter& w, Gas const& gas)
 	w.Float(gas.largeMean);
 	w.Float(gas.textureMean);
 	w.Float(gas.youngLight);
-	w.Align(4);
 }
 
 void PackDisk(ScalarWriter& w, Disk const& disk)
