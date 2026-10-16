@@ -36,14 +36,17 @@ using uint = uint32_t;
 
 // GLSL's built-ins under their GLSL names, so shared code reads the same in both languages.
 using std::abs;
+using std::cos;
 using std::exp;
 using std::floor;
 using std::log;
 using std::pow;
+using std::sin;
 using std::sqrt;
 using std::tan;
 using glm::clamp;
 using glm::dot;
+using glm::length;
 using glm::max;
 using glm::min;
 using glm::mix;
@@ -57,6 +60,12 @@ inline double atan(double y, double x)
 inline double FMod(double x, double y)
 {
 	return std::fmod(x, y);
+}
+
+// The disc radius of (x, y), exact on the CPU so the reference does not move; GLSL has no hypot.
+inline double Hypot(double x, double y)
+{
+	return std::hypot(x, y);
 }
 
 inline constexpr double kHugeReal = HUGE_VAL;
@@ -78,6 +87,11 @@ inline constexpr double kHugeReal = HUGE_VAL;
 real FMod(real x, real y)
 {
 	return x - y * trunc(x / y);
+}
+
+real Hypot(real x, real y)
+{
+	return sqrt(x * x + y * y);
 }
 
 // Large enough that no luminosity reaches it; GLSL has no portable constant infinity.

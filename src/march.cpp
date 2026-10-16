@@ -62,36 +62,6 @@ double Walk(PreparedScene const& scene, MarchParams const& params, glm::dvec3 di
 	return depth;
 }
 
-// Density and transmittance are constant over a step but distance is integrated exactly across it:
-// deciding resolved-or-diffuse once per step at its midpoint quantised the boundary to the step grid,
-// which showed up as +-9% ripples in star counts.
-// Lowest luminosity resolved at distance x: L T_V 100 C / x^2 >= F_res.
-double MinResolvedLuminosity(double fluxThreshold, Step const& step, double x)
-{
-	double const tv = step.transmittance.y;
-	if (!(tv > 0.0))
-	{
-		return HUGE_VAL;
-	}
-	return fluxThreshold * x * x / (100.0 * kFluxAt10pc * tv);
-}
-
-// Distance out to which a star of luminosity L is resolved.
-double ResolvedDistance(double fluxThreshold, Step const& step, double luminosity)
-{
-	return std::sqrt(luminosity * 100.0 * kFluxAt10pc * step.transmittance.y / fluxThreshold);
-}
-
-double CubeSpan(double x, double y)
-{
-	return (y * y * y - x * x * x) / 3.0;
-}
-
-int FirstResolvedBin(PopulationTable const& population, double minLuminosity)
-{
-	return int(std::lower_bound(population.luminosity.begin(), population.luminosity.end(), minLuminosity) - population.luminosity.begin());
-}
-
 }
 
 MarchParams ParamsFor(Quality quality)
@@ -125,14 +95,6 @@ PreparedScene PrepareScene(Scene const& scene)
 	prepared.skyToScene = SkyToScene(scene.observer);
 	prepared.sMin = scene.observer.sMin;
 	return prepared;
-}
-
-glm::dvec3 TransmittanceForDepth(double magnitudes)
-{
-	// Channel extinction relative to V approximates Cardelli R_V = 3.1 at 610, 550 and 465 nm;
-	// 1.0857 = 2.5 / ln 10 turns magnitudes into optical depth.
-	double const tau = magnitudes / 1.0857;
-	return {std::exp(-0.75 * tau), std::exp(-1.00 * tau), std::exp(-1.32 * tau)};
 }
 
 void RayIntervals(PreparedScene const& scene, glm::dvec3 dir, double maxDistance, std::vector<Interval>& out)
@@ -187,28 +149,8 @@ void MarchRay(PreparedScene const& scene, MarchParams const& params, glm::dvec3 
 		out.radiance += (weight * step.ds) * (step.transmittance * step.gas);
 		for (Contribution const& part : step.parts)
 		{
-			PopulationTable const& population = scene.populations[size_t(part.population)];
-			int const splitA = FirstResolvedBin(population, MinResolvedLuminosity(fluxThreshold, step, step.a));
-			int const splitB = FirstResolvedBin(population, MinResolvedLuminosity(fluxThreshold, step, step.b));
-			// n s^2 dOmega ds stars at flux 100 L C / s^2 each: the s^2 cancels, leaving radiance 100 n L C ds.
-			out.radiance += (weight * part.density * 100.0 * kFluxAt10pc * step.ds) * (step.transmittance * population.lightBelow[size_t(splitA)]);
-			double const lightScale = weight * part.density * 100.0 * kFluxAt10pc;
-			for (int bin = splitA; bin < splitB; ++bin)
-			{
-				// Resolved out to c, diffuse beyond it.
-				double const c = std::clamp(ResolvedDistance(fluxThreshold, step, population.luminosity[size_t(bin)]), step.a, step.b);
-				double const f = population.fraction[size_t(bin)];
-				glm::dvec3 const binLight = step.transmittance * population.chroma[size_t(bin)] * (f * population.luminosity[size_t(bin)]);
-				out.budget[size_t(bin)] += part.density * f * sampleSolidAngle * CubeSpan(step.a, c);
-				out.radiance += (lightScale * (step.b - c)) * binLight;
-				out.resolvedRadiance += (lightScale * (c - step.a)) * binLight;
-			}
-			for (int bin = splitB; bin < kBins; ++bin)
-			{
-				double const f = population.fraction[size_t(bin)];
-				out.budget[size_t(bin)] += part.density * f * sampleSolidAngle * CubeSpan(step.a, step.b);
-				out.resolvedRadiance += (lightScale * step.ds) * (step.transmittance * population.chroma[size_t(bin)] * (f * population.luminosity[size_t(bin)]));
-			}
+			AccumulatePart(scene.populations[size_t(part.population)], part.density, fluxThreshold, step.a, step.b, step.ds,
+				step.transmittance, weight, sampleSolidAngle, out);
 		}
 	});
 }
@@ -313,7 +255,7 @@ std::optional<StarSample> SampleStar(PreparedScene const& scene, MarchParams con
 		{
 			PopulationTable const& population = scene.populations[size_t(part.population)];
 			double const x = step.a;
-			double const y = std::min(step.b, ResolvedDistance(fluxThreshold, step, population.luminosity[size_t(bin)]));
+			double const y = std::min(step.b, ResolvedDistance(fluxThreshold, step.transmittance.y, population.luminosity[size_t(bin)]));
 			if (!(y > x))
 			{
 				continue;

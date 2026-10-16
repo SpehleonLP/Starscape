@@ -1,6 +1,7 @@
 #pragma once
 #include "galaxy.h"
 #include "population.h"
+#include "field/step.glsl.h"
 #include "scene.h"
 #include <array>
 #include <optional>
@@ -42,18 +43,7 @@ struct Interval
 // Sorted, merged stretches of the ray inside any galaxy's bounding sphere, clipped to [sMin, maxDistance].
 void RayIntervals(PreparedScene const& scene, glm::dvec3 dirScene, double maxDistance, std::vector<Interval>& out);
 
-// Per-channel transmittance behind `magnitudes` of visual extinction.
-glm::dvec3 TransmittanceForDepth(double magnitudes);
 glm::dvec3 TransmittanceTo(PreparedScene const& scene, MarchParams const& params, glm::dvec3 dirSky, double distance);
-
-struct RayResult
-{
-	glm::dvec3                radiance{0.0};   // mag-0 flux per steradian, linear Rec.709
-	std::array<double, kBins> budget{};        // expected resolved stars per luminosity bin
-	// The expected light of those resolved stars, in radiance units. Not used by the cook; it exists so the
-	// split can be checked exactly: radiance + resolvedRadiance is the same with any threshold.
-	glm::dvec3                resolvedRadiance{0.0};
-};
 
 // Adds `weight` × this ray's diffuse radiance and its point budget over `sampleSolidAngle` to `out`.
 void MarchRay(PreparedScene const& scene, MarchParams const& params, glm::dvec3 dirSky, double fluxThreshold,
