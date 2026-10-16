@@ -1,4 +1,5 @@
 #include "cook.h"
+#include "rng.h"
 #include "test_scenes.h"
 #include <kre_starscape.h>
 #include <doctest.h>

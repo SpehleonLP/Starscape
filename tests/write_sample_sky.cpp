@@ -1,5 +1,6 @@
 // Writes a small synthetic sky to argv[1], so the CLI's inspect and preview tests have a file without a GPU cook.
 #include "writer.h"
+#include "rng.h"
 #include <cstdio>
 
 using namespace starscape;

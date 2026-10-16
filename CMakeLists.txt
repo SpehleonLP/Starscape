@@ -103,7 +103,8 @@ add_test(NAME unit COMMAND starscape-tests)
 set(CLI_OUT ${CMAKE_CURRENT_BINARY_DIR}/cli-test)
 file(MAKE_DIRECTORY ${CLI_OUT})
 
-# Both GPU executables exit 77, which ctest reports as skipped, when the machine has no device they can use.
+# Both GPU executables exit 77, which ctest reports as skipped, when the machine has no device they can use, and
+# fail instead when STARSCAPE_REQUIRE_GPU is set (tests/gpu/require_gpu.h).
 # The device and probe tests accept a software device such as llvmpipe; the cooks need what a cook needs.
 add_executable(starscape-gpu-tests tests/gpu/main.cpp tests/gpu/test_device.cpp tests/gpu/test_probe.cpp)
 target_link_libraries(starscape-gpu-tests PRIVATE starscape-core)
@@ -162,5 +163,6 @@ add_test(NAME cli-nebula-defaults-inert COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_
 	-DSCENE_A=${CMAKE_CURRENT_SOURCE_DIR}/tests/data/nebula-absent.toml -DSCENE_B=${CMAKE_CURRENT_SOURCE_DIR}/tests/data/nebula-defaults.toml
 	-DOUT=${CLI_OUT} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/expect_same_cooks.cmake)
 
-# On a machine with no usable GPU every cook refuses; those tests report skipped rather than failed.
-set_tests_properties(cli-cook cli-draft cli-draft-stylized cli-determinism cli-nebula-defaults-inert PROPERTIES SKIP_REGULAR_EXPRESSION "no GPU to march on")
+# On a machine with no usable GPU every cook refuses; those tests report skipped rather than failed, unless
+# STARSCAPE_REQUIRE_GPU is set when ctest runs (tests/gpu_refusal.cmake prints the marker only without it).
+set_tests_properties(cli-cook cli-draft cli-draft-stylized cli-determinism cli-nebula-defaults-inert PROPERTIES SKIP_REGULAR_EXPRESSION "STARSCAPE-SKIP")

@@ -127,8 +127,9 @@ void main()
 		{
 			anchor[g] = frames[g].localOrigin + begins[i] * dirLocal[g];
 		}
-		// Distance is carried from the interval's start (spec §3): near the observer's end of a stretch 790 kpc out a float
-		// offset keeps every step's width, where an absolute float distance there resolves only 0.06 pc of a 25 pc step.
+		// Distance is carried from the interval's start (docs/spec.md §2 "The GPU march", Precision): near the
+		// observer's end of a stretch 790 kpc out a float offset keeps every step's width, where an absolute float
+		// distance there resolves only 0.06 pc of a 25 pc step.
 		const float stretch = ends[i] - begins[i];
 		float t = 0.0;
 		while (t < stretch)

@@ -1,7 +1,6 @@
 #pragma once
 #include "common.h"
 #include "field/galaxy.glsl.h"
-#include "gpu/device.h"
 #include <array>
 #include <cstdint>
 #include <span>
@@ -11,6 +10,8 @@
 
 namespace starscape::gpu
 {
+
+class Device;
 
 // Test-only: one-shot kernels that run a piece of the shared field model on the GPU so a test can hold it
 // against the host's compilation of the same code. They allocate and free their own buffers and pipeline on every call.

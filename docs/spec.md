@@ -522,8 +522,10 @@ queue priority it ran at.
   refuses.
 - *Shaders.* GLSL compute shaders, compiled to SPIR-V at build time by
   `glslangValidator` (required) and embedded in the binary.
-- *Data.* The prepared galaxies, the population tables and the march parameters
-  are uploaded once per cook as storage buffers.
+- *Data.* The prepared galaxies, their observer frames and the population tables
+  are uploaded once per cook as storage buffers. The march parameters, the pass's
+  stratum, seed and flux threshold, and the tile's rows go up as push constants
+  with each tile's dispatch.
 - *Tiles.* A pass covers the six faces in tiles of rows. The first tile is 8
   rows; each later tile is sized from the previous one's measured time to stay
   near 0.25 s per dispatch, which keeps the desktop responsive and the driver's
@@ -531,8 +533,12 @@ queue priority it ran at.
 - *Accumulators.* The per-texel sums (3 radiance floats and 24 budget bins) live
   on the host. Around each face's dispatches that face's slice is uploaded and
   read back; at face 2048 a slice is 4 M texels × 27 floats ≈ 450 MB, well under a
-  second against minutes of marching. The host holds 6 · S² · 27 · 4 bytes in all,
-  42 MB at face 256 and 2.7 GB at 2048.
+  second against minutes of marching. The host keeps the sums in float as well,
+  since every pass rounds them through the GPU's floats: 27 × 4 = 108 bytes per
+  texel. With the snapshot's diffuse radiance (3 doubles, 24 bytes) a cook holds
+  132 bytes per texel, 6 · S² · 132 bytes in all: 52 MB at face 256 and 3.3 GB at
+  2048 (2.7 GB of sums and 0.6 GB of diffuse), plus 2.4 GB more at 2048 when a
+  test asks for the snapshot's budget.
 
 **Refusals.** A cook is an input error (exit 1, no file written), raised before
 the calibration starts, when:
@@ -760,7 +766,7 @@ position = [780000.0, 120000.0, -40000.0]
 
 ```
 starscape cook    <scene.toml> -o <out.kre_starscape> [--preview <out.hdr>] [--threads N] [--quick | --draft] [--width N]
-starscape preview <in.kre_starscape> -o <out.hdr> [--width N] [--exposure EV]
+starscape preview <in.kre_starscape> -o <out.hdr> [--width N] [--exposure EV] [--threads N]
 starscape inspect <in.kre_starscape>
 ```
 
@@ -797,11 +803,23 @@ Four kinds of entry:
   jitter probe and the field probe.
 - `cook` (`starscape-cook-tests`): everything that cooks, so it needs what a cook
   needs. Analytic cooks, partial output, determinism, the refusals.
-- the `cli-*` entries drive the `starscape` binary. Entries that cook match
-  `no GPU to march on` as ctest's SKIP_REGULAR_EXPRESSION.
+- the `cli-*` entries drive the `starscape` binary. When a cook refuses with
+  `no GPU to march on`, the entries that cook print `STARSCAPE-SKIP`, ctest's
+  SKIP_REGULAR_EXPRESSION for them (`tests/gpu_refusal.cmake`).
 
 With no qualifying device `gpu` and `cook` print the reason and exit 77, ctest's
 `SKIP_RETURN_CODE`, so the summary shows them as skipped, never as passed.
+
+A skip is also what a device check that wrongly refuses every GPU would produce,
+and ctest would still report 100% passed. The owner therefore runs the gate as
+
+```
+STARSCAPE_REQUIRE_GPU=1 ctest --test-dir Build --output-on-failure
+```
+
+With `STARSCAPE_REQUIRE_GPU` set (to anything but empty or `0`) when the tests
+run, `gpu` and `cook` exit 1 instead of 77 and the cooking `cli-*` entries fail
+instead of printing the skip marker; no reconfigure is needed.
 
 | Test | Assertion | Mutation that must fail it |
 |---|---|---|
@@ -816,6 +834,7 @@ With no qualifying device `gpu` and `cook` print the reason and exit 77, ctest's
 | Workgroup edge (`cook`) | The same ball at face 4, smaller than a workgroup | drop the edge test |
 | Midpoint sampling (`cook`) | A halo peaked on the observer: every texel's radiance equals the closed-form column to 10⁻³ | sample each step at its start |
 | Partial output (`cook`) | A cook stopped after a pass leaves a whole sky of the passes so far; an error from `onPass` ends the cook | return before the snapshot's stars are drawn |
+| Required GPU (owner's gate) | Under `STARSCAPE_REQUIRE_GPU=1`, a device check that refuses every device fails `gpu`, `cook` and the cooking `cli-*` entries instead of skipping them | make `Shortfall` refuse every device |
 | Galaxy cap (`cook`) | 17 galaxies: an input error naming the cap | drop the cap check |
 | No GPU (`unit`, `cli-no-gpu`) | `STARSCAPE_GPU_DISABLE=1`: a cook refuses before the calibration starts; the CLI exits 1, writes no file, and stderr says `no GPU to march on: the GPU is disabled by STARSCAPE_GPU_DISABLE` | ignore the variable |
 | Euclidean counts | Infinite uniform dust-free single-bin medium: fitted slope of log N(>F) vs log F is −1.5 ± 0.05 over 3 decades | drop the s² in the point budget |

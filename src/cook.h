@@ -1,8 +1,6 @@
 #pragma once
 #include "common.h"
 #include "march.h"
-#include "population.h"
-#include "rng.h"
 #include "scene.h"
 #include <array>
 #include <cstdint>
@@ -14,6 +12,8 @@
 
 namespace starscape
 {
+
+class RandomStream;
 
 struct CookedStar
 {
@@ -69,10 +69,11 @@ struct Stratum
 // perAxis must be a power of two.
 Stratum PassStratum(int perAxis, int pass);
 
-// The running sums a pass adds to: per texel, Σ weight · radiance and Σ budget.
+// The running sums a pass adds to: per texel, Σ weight · radiance and Σ budget. Float, because the GPU holds
+// and accumulates them in float and every pass rounds them through it; double here would only cost memory.
 struct PassSums
 {
-	std::vector<glm::dvec3>               radiance;
+	std::vector<glm::vec3>                radiance;
 	std::vector<std::array<float, kBins>> budget;
 };
 

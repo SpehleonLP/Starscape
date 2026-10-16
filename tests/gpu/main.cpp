@@ -1,9 +1,10 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "gpu/device.h"
+#include "gpu/require_gpu.h"
 #include <doctest.h>
-#include <cstdio>
 
 // ctest reads 77 as "skipped": a machine without a usable device must never report these tests as passed.
+// STARSCAPE_REQUIRE_GPU turns that into a failure.
 int main(int argc, char** argv)
 {
 	// The probe device is destroyed before the tests run: volkLoadDevice fills process-wide function pointers,
@@ -12,8 +13,7 @@ int main(int argc, char** argv)
 		auto device = starscape::gpu::OpenDevice({.allowSoftware = true});
 		if (!device)
 		{
-			std::printf("SKIPPED: %s\n", device.error().message.c_str());
-			return 77;
+			return starscape::test::NoDeviceExit(device.error().message);
 		}
 	}
 	doctest::Context context(argc, argv);

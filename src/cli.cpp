@@ -177,7 +177,7 @@ int Cook(Arguments const& args)
 	{
 		scene->output.previewWidth = *args.width;
 	}
-	Log(std::format("cooking {} on {} threads", args.positional[0], args.threads));
+	Log(std::format("cooking {} on {} host threads", args.positional[0], args.threads));
 	int lastPercent = -1;
 	std::string lastPhase;
 	CookOptions options;

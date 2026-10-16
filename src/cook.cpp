@@ -1,12 +1,12 @@
 #include "cook.h"
 #include "gpu/gpu_march.h"
 #include "parallel.h"
+#include "rng.h"
 #include <kre_starscape.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
-#include <functional>
 #include <format>
 #include <memory>
 #include <glm/geometric.hpp>
@@ -173,7 +173,7 @@ Expected<Cooked> Snapshot(Scene const& scene, PreparedScene const& prepared, Mar
 	cooked.diffuse.resize(texels);
 	for (uint32_t texel = 0; texel < texels; ++texel)
 	{
-		cooked.diffuse[texel] = sums.radiance[texel] * scale;
+		cooked.diffuse[texel] = glm::dvec3(sums.radiance[texel]) * scale;
 	}
 	// The mean budget is read straight from the sums rather than copied: at face 2048 a copy is 2.4 GB.
 	float const budgetScale = float(scale);
@@ -314,7 +314,7 @@ Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 	}
 
 	// 2. Passes: one ray per texel each, a complete sky after every one.
-	PassSums sums{std::vector<glm::dvec3>(texels, glm::dvec3(0.0)), std::vector<std::array<float, kBins>>(texels)};
+	PassSums sums{std::vector<glm::vec3>(texels, glm::vec3(0.0f)), std::vector<std::array<float, kBins>>(texels)};
 	std::optional<Cooked> latest;
 	for (; pass < passes; ++pass)
 	{
@@ -333,10 +333,8 @@ Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 			break;
 		}
 	}
-	if (!latest)
-	{
-		return InputError("no pass ran");
-	}
+	// ParamsFor fixes samplesPerAxis at 1 or 4 for every quality (no scene can set it), so the loop runs at least
+	// once, and every iteration that does not return an error leaves `latest` set.
 	return std::move(*latest);
 }
 

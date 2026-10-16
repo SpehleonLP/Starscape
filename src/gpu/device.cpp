@@ -300,9 +300,18 @@ Expected<std::unique_ptr<Device>> OpenDevice(DeviceOptions const& options)
 
 	VkCommandPoolCreateInfo const poolInfo{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
 		.queueFamilyIndex = best->queueFamily};
-	STARSCAPE_TRY(Check(vkCreateCommandPool(device->m_device, &poolInfo, nullptr, &device->m_pool), "vkCreateCommandPool"));
+	// A failed create leaves its output undefined, and ~Device destroys whatever is not null.
+	if (VkResult const r = vkCreateCommandPool(device->m_device, &poolInfo, nullptr, &device->m_pool); r != VK_SUCCESS)
+	{
+		device->m_pool = VK_NULL_HANDLE;
+		return std::unexpected(Check(r, "vkCreateCommandPool").error());
+	}
 	VkFenceCreateInfo const fenceInfo{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-	STARSCAPE_TRY(Check(vkCreateFence(device->m_device, &fenceInfo, nullptr, &device->m_fence), "vkCreateFence"));
+	if (VkResult const r = vkCreateFence(device->m_device, &fenceInfo, nullptr, &device->m_fence); r != VK_SUCCESS)
+	{
+		device->m_fence = VK_NULL_HANDLE;
+		return std::unexpected(Check(r, "vkCreateFence").error());
+	}
 	return device;
 }
 
@@ -358,6 +367,11 @@ Expected<Buffer> Device::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usag
 	return buffer;
 }
 
+void Device::WaitIdle()
+{
+	vkDeviceWaitIdle(m_device);
+}
+
 void Device::Destroy(Buffer& buffer)
 {
 	if (buffer.mapped != nullptr)
@@ -391,6 +405,13 @@ Expected<double> Device::Submit(std::function<void(VkCommandBuffer)> const& reco
 		VkSubmitInfo const submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &commands};
 		STARSCAPE_TRY(Check(vkQueueSubmit(m_queue, 1, &submit, m_fence), "vkQueueSubmit"));
 		Expected<void> const waited = Check(vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, UINT64_MAX), "vkWaitForFences");
+		if (!waited)
+		{
+			// A failed wait (out of memory, not only device loss) says nothing about the submission, which may
+			// still be running: resetting the fence, freeing the command buffer or letting the caller unwind
+			// and destroy the buffers it reads would all race the GPU.
+			vkDeviceWaitIdle(m_device);
+		}
 		// The fence is reset even when the wait failed, so a later submission does not inherit a signal.
 		vkResetFences(m_device, 1, &m_fence);
 		return waited;

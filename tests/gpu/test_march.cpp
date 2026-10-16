@@ -378,7 +378,7 @@ std::vector<double> TileReports(double tileSeconds)
 		OpenGpuMarcher(prepared, ParamsFor(Quality::Quick), size, [&](double done) { reports.push_back(done); }, tileSeconds);
 	REQUIRE(marcher.has_value());
 	uint32_t const texels = 6 * size * size;
-	PassSums sums{std::vector<glm::dvec3>(texels, glm::dvec3(0.0)), std::vector<std::array<float, kBins>>(texels)};
+	PassSums sums{std::vector<glm::vec3>(texels, glm::vec3(0.0f)), std::vector<std::array<float, kBins>>(texels)};
 	PassSpec const spec{size, 1, {0, 0}, 0.025, scene.output.seed};
 	REQUIRE((*marcher)->MarchPass(spec, sums).has_value());
 	return reports;

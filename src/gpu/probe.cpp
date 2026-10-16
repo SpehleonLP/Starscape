@@ -1,4 +1,5 @@
 #include "gpu/probe.h"
+#include "gpu/device.h"
 #include "gpu/pack.h"
 #include "probe.spv.h"
 #include <algorithm>
@@ -26,6 +27,8 @@ public:
 	explicit Run(Device& device) : m_device(device) {}
 	~Run()
 	{
+		// A failed submission can unwind here with the dispatch still using everything below.
+		m_device.WaitIdle();
 		m_device.DestroyPipeline(m_pipeline);
 		m_device.DestroyDescriptorPool(m_pool);
 		m_device.DestroyPipelineLayout(m_pipelineLayout);
@@ -78,11 +81,18 @@ public:
 			vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 1, &set, 0, nullptr);
 			vkCmdPushConstants(commands, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof push, &push);
 			vkCmdDispatch(commands, (count + kGroupSize - 1) / kGroupSize, 1, 1);
+			// The fence orders execution only: the shader's writes still need making visible to the host that
+			// reads the mapped output, as march.cpp's ReleaseToHost does for its copies.
+			VkMemoryBarrier const barrier{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+				.dstAccessMask = VK_ACCESS_HOST_READ_BIT};
+			vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, nullptr, 0,
+				nullptr);
 		}));
 		return {};
 	}
 
-	// Valid after Execute; the memory is coherent, and Submit has waited for the GPU.
+	// Valid after Execute; the memory is coherent, Submit has waited for the GPU, and Execute's barrier made the
+	// shader's writes host-visible.
 	uint32_t const* Output() const { return static_cast<uint32_t const*>(m_buffers[2].mapped); }
 
 private:

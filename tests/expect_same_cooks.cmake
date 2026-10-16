@@ -1,9 +1,10 @@
 # Cooks SCENE_A and SCENE_B with --draft and requires byte-identical sky files apart from the scene hash.
+include(${CMAKE_CURRENT_LIST_DIR}/gpu_refusal.cmake)
 foreach(side A B)
 	execute_process(COMMAND "${EXE}" cook "${SCENE_${side}}" -o "${OUT}/same-${side}.kre_starscape" --draft
 		RESULT_VARIABLE code OUTPUT_QUIET ERROR_VARIABLE errors)
 	if(NOT code EQUAL 0)
-		message(FATAL_ERROR "cook of ${SCENE_${side}} exited ${code}: ${errors}")
+		starscape_fail_run("cook of ${SCENE_${side}} exited ${code}" "${errors}")
 	endif()
 endforeach()
 # Header bytes 8..15 hold the FNV-1a hash of the scene text (include/kre_starscape.h), which differs between

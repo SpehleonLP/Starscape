@@ -67,6 +67,9 @@ public:
 	// Host-visible buffers are HOST_COHERENT and stay mapped; the others are DEVICE_LOCAL.
 	Expected<Buffer> CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, bool hostVisible);
 	void Destroy(Buffer& buffer);
+	// Owners call this before destroying objects a submission may use: a failed Submit can unwind with work
+	// still on the queue, and ~Device's own wait comes after its users' destructors.
+	void WaitIdle();
 	// Records `record` into a one-shot command buffer, submits it and waits; returns the wall time in seconds.
 	Expected<double> Submit(std::function<void(VkCommandBuffer)> const& record);
 	// Entry point "main"; the shader module is not kept.

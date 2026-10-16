@@ -19,6 +19,10 @@ C++23 (GCC 13+) and `glslangValidator` at build time. Dependencies are vendored 
 a compute queue, `shaderInt64` and `scalarBlockLayout` (a software device such as llvmpipe does not count), and without one it refuses with exit 1, saying what the machine lacks. On such
 a machine the tests that cook report skipped.
 
+A wrongly refused GPU skips those tests just the same, so on a machine with a GPU run the gate with
+`STARSCAPE_REQUIRE_GPU=1 ctest --test-dir Build --output-on-failure`: a missing device then fails the GPU and cook
+tests instead of skipping them (read when the tests run; no reconfigure).
+
 ## Use
 
 ```
@@ -29,7 +33,7 @@ starscape preview sky.kre_starscape -o bright.hdr --exposure 4
 starscape inspect sky.kre_starscape
 ```
 
-Options: `--threads N` (cook: the calibration and the star draws; preview; output is byte-identical for any
+Options: `--threads N` (cook: the host threads of the calibration and the star draws; preview; output is byte-identical for any
 thread count),
 `--quick` and `--draft` (cook), `--width N` (cook and preview: preview width) and `--exposure EV` (preview). Exit codes: 0 success,
 1 invalid input or usage, 2 I/O failure.

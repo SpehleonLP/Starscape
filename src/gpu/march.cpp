@@ -74,7 +74,12 @@ class Scratch
 {
 public:
 	explicit Scratch(Device& device) : m_device(device) {}
-	~Scratch() { m_device.Destroy(buffer); }
+	~Scratch()
+	{
+		// A failed submission can unwind here with the upload still reading this buffer.
+		m_device.WaitIdle();
+		m_device.Destroy(buffer);
+	}
 	Scratch(Scratch const&) = delete;
 	Scratch& operator=(Scratch const&) = delete;
 
@@ -102,6 +107,9 @@ public:
 
 	~GpuMarcher() override
 	{
+		// A failed submission can unwind here with a dispatch still using everything below; ~Device's own wait
+		// comes too late, after these are gone.
+		m_device->WaitIdle();
 		m_device->DestroyPipeline(m_pipeline);
 		m_device->DestroyDescriptorPool(m_pool);
 		m_device->DestroyPipelineLayout(m_pipelineLayout);
@@ -218,9 +226,9 @@ public:
 			{
 				uint32_t const texel = face * faceTexels + i;
 				float* const out = staged + size_t(i) * kSumsPerTexel;
-				out[0] = float(sums.radiance[texel].x);
-				out[1] = float(sums.radiance[texel].y);
-				out[2] = float(sums.radiance[texel].z);
+				out[0] = sums.radiance[texel].x;
+				out[1] = sums.radiance[texel].y;
+				out[2] = sums.radiance[texel].z;
 				std::memcpy(out + 3, sums.budget[texel].data(), sizeof(float) * kBins);
 			}
 			STARSCAPE_TRY(m_device->Submit([&](VkCommandBuffer commands)
@@ -259,7 +267,7 @@ public:
 			{
 				uint32_t const texel = face * faceTexels + i;
 				float const* const in = staged + size_t(i) * kSumsPerTexel;
-				sums.radiance[texel] = glm::dvec3(in[0], in[1], in[2]);
+				sums.radiance[texel] = glm::vec3(in[0], in[1], in[2]);
 				std::memcpy(sums.budget[texel].data(), in + 3, sizeof(float) * kBins);
 			}
 		}
@@ -326,7 +334,7 @@ private:
 }
 
 Expected<std::unique_ptr<PassMarcher>> OpenGpuMarcher(PreparedScene const& prepared, MarchParams const& params, uint32_t faceSize,
-	std::function<void(double)> progress, double tileSeconds)
+	std::function<void(double)>&& progress, double tileSeconds)
 {
 	Expected<std::unique_ptr<Device>> device = gpu::OpenDevice({});
 	if (!device)
