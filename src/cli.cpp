@@ -25,7 +25,7 @@ namespace
 
 constexpr char const* kUsage =
 	"usage:\n"
-	"  starscape cook    <scene.toml> -o <out.kre_starscape> [--preview <out.hdr>] [--threads N] [--quick | --draft] [--width N]\n"
+	"  starscape cook    <scene.toml> -o <out.kre_starscape> [--preview <out.hdr>] [--threads N] [--quick | --draft] [--width N] [--device auto|gpu|cpu]\n"
 	"  starscape preview <in.kre_starscape> -o <out.hdr> [--width N] [--exposure EV] [--threads N]\n"
 	"  starscape inspect <in.kre_starscape>\n";
 
@@ -61,6 +61,7 @@ struct Arguments
 	bool draft = false;
 	std::optional<uint32_t> width;
 	double exposure = 0.0;
+	DeviceChoice device = DeviceChoice::Auto;
 };
 
 template<class T>
@@ -92,7 +93,7 @@ std::optional<std::string> ParseArguments(int argc, char** argv, Arguments& out)
 		{
 			out.draft = true;
 		}
-		else if (arg == "-o" || arg == "--preview" || arg == "--threads" || arg == "--width" || arg == "--exposure")
+		else if (arg == "-o" || arg == "--preview" || arg == "--threads" || arg == "--width" || arg == "--exposure" || arg == "--device")
 		{
 			std::optional<std::string_view> const v = value();
 			if (!v)
@@ -122,6 +123,25 @@ std::optional<std::string> ParseArguments(int argc, char** argv, Arguments& out)
 					return "--width needs an even integer from 16 to 65536";
 				}
 				out.width = width;
+			}
+			else if (arg == "--device")
+			{
+				if (*v == "auto")
+				{
+					out.device = DeviceChoice::Auto;
+				}
+				else if (*v == "gpu")
+				{
+					out.device = DeviceChoice::Gpu;
+				}
+				else if (*v == "cpu")
+				{
+					out.device = DeviceChoice::Cpu;
+				}
+				else
+				{
+					return std::format("--device needs auto, gpu or cpu, not '{}'", *v);
+				}
 			}
 			else
 			{
@@ -182,6 +202,8 @@ int Cook(Arguments const& args)
 	std::string lastPhase;
 	CookOptions options;
 	options.threads = args.threads;
+	options.device = args.device;
+	options.log = [](std::string_view line) { Log(line); };
 	if (args.quick || args.draft)
 	{
 		options.quality = Quality::Quick;
@@ -234,7 +256,7 @@ int Cook(Arguments const& args)
 	int const scenePasses = params.samplesPerAxis * params.samplesPerAxis;
 
 	double const total = cooked.stats.pointFlux + cooked.stats.diffuseFlux;
-	Log(std::format("wrote {} ({} of {} passes)", *args.output, cooked.passes, scenePasses));
+	Log(std::format("wrote {} ({} of {} passes), marched on {}", *args.output, cooked.passes, scenePasses, cooked.device));
 	Log(std::format("threshold F_res = {:.4g} (magnitude {:.2f}); {} stars; points carry {:.2f}% of the light",
 		cooked.fluxThreshold, -2.5 * std::log10(cooked.fluxThreshold), cooked.stats.starCount,
 		total > 0.0 ? 100.0 * cooked.stats.pointFlux / total : 0.0));

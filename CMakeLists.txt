@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(Starscape VERSION 0.1 LANGUAGES CXX)
+project(Starscape VERSION 0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,6 +19,7 @@ set(STARSCAPE_SOURCES
 	src/scene.cpp
 	src/march.cpp
 	src/cook.cpp
+	src/gpu/march_stub.cpp
 	src/writer.cpp
 	src/preview.cpp
 )
@@ -31,6 +32,54 @@ if(NOT MSVC)
 	target_compile_options(starscape-core PUBLIC -Wall -Wextra -Wpedantic)
 endif()
 target_link_libraries(starscape-core PUBLIC Threads::Threads)
+
+# The GPU march: Vulkan loaded at run time through volk, so a binary without a Vulkan driver still runs
+# (on the CPU); shaders compiled at build time and embedded, so it needs no files beside it.
+find_program(GLSLANG_VALIDATOR glslangValidator)
+if(GLSLANG_VALIDATOR)
+	set(STARSCAPE_GPU_DEFAULT ON)
+else()
+	set(STARSCAPE_GPU_DEFAULT OFF)
+endif()
+option(STARSCAPE_GPU "Build the Vulkan compute march" ${STARSCAPE_GPU_DEFAULT})
+if(STARSCAPE_GPU AND NOT GLSLANG_VALIDATOR)
+	message(WARNING "STARSCAPE_GPU needs glslangValidator; building without the GPU march")
+	set(STARSCAPE_GPU OFF)
+endif()
+if(NOT STARSCAPE_GPU)
+	message(STATUS "Starscape: GPU march off; cooks run on the CPU")
+endif()
+
+set(SHADER_OUT ${CMAKE_CURRENT_BINARY_DIR}/shaders)
+file(MAKE_DIRECTORY ${SHADER_OUT})
+function(starscape_shader name)
+	set(source ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${name}.comp)
+	file(GLOB field_headers ${CMAKE_CURRENT_SOURCE_DIR}/src/field/*.glsl.h ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.glsl)
+	add_custom_command(OUTPUT ${SHADER_OUT}/${name}.h
+		COMMAND ${GLSLANG_VALIDATOR} -V --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/src -I${CMAKE_CURRENT_SOURCE_DIR}/shaders
+			-o ${SHADER_OUT}/${name}.spv ${source}
+		COMMAND ${CMAKE_COMMAND} -DIN=${SHADER_OUT}/${name}.spv -DOUT=${SHADER_OUT}/${name}.h -DNAME=k_${name}_spirv
+			-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedSpirv.cmake
+		DEPENDS ${source} ${field_headers} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedSpirv.cmake
+		VERBATIM)
+	set_property(GLOBAL APPEND PROPERTY STARSCAPE_SHADER_HEADERS ${SHADER_OUT}/${name}.h)
+endfunction()
+
+if(STARSCAPE_GPU)
+	add_library(starscape-volk STATIC third_party/volk/volk.c)
+	target_include_directories(starscape-volk SYSTEM PUBLIC third_party/volk third_party/vulkan)
+	target_compile_definitions(starscape-volk PUBLIC VK_NO_PROTOTYPES)
+	target_link_libraries(starscape-volk PUBLIC ${CMAKE_DL_LIBS})
+	target_sources(starscape-core PRIVATE src/gpu/device.cpp)
+	# Vulkan create-info structs are written with designated initializers that name only the fields in use;
+	# the omitted ones are meant to be zero, which is what this warning objects to.
+	if(NOT MSVC)
+		set_source_files_properties(src/gpu/device.cpp tests/gpu/test_device.cpp PROPERTIES COMPILE_OPTIONS -Wno-missing-field-initializers)
+	endif()
+	target_compile_definitions(starscape-core PUBLIC STARSCAPE_GPU=1)
+	target_link_libraries(starscape-core PUBLIC starscape-volk)
+	target_include_directories(starscape-core PUBLIC ${SHADER_OUT})
+endif()
 
 enable_testing()
 set(STARSCAPE_TESTS
@@ -49,6 +98,13 @@ set(STARSCAPE_TESTS
 add_executable(starscape-tests ${STARSCAPE_TESTS})
 target_link_libraries(starscape-tests PRIVATE starscape-core)
 add_test(NAME unit COMMAND starscape-tests)
+
+if(STARSCAPE_GPU)
+	add_executable(starscape-gpu-tests tests/gpu/main.cpp tests/gpu/test_device.cpp)
+	target_link_libraries(starscape-gpu-tests PRIVATE starscape-core)
+	add_test(NAME gpu COMMAND starscape-gpu-tests)
+	set_tests_properties(gpu PROPERTIES SKIP_RETURN_CODE 77)
+endif()
 
 add_executable(starscape src/cli.cpp)
 target_link_libraries(starscape PRIVATE starscape-core)
@@ -75,6 +131,11 @@ starscape_cli_test(cli-missing-file 2 ARGV_LIST inspect ${CLI_OUT}/absent.kre_st
 starscape_cli_test(cli-usage 1 ARGV_LIST frobnicate)
 starscape_cli_test(cli-draft 0 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/scenes/milky-way-from-earth.toml -o ${CLI_OUT}/draft.kre_starscape --draft --preview ${CLI_OUT}/draft.hdr)
 starscape_cli_test(cli-draft-stylized 0 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/scenes/stylized-milky-way.toml -o ${CLI_OUT}/stylized.kre_starscape --draft --preview ${CLI_OUT}/stylized.hdr)
+starscape_cli_test(cli-device-bad 1 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.toml -o ${CLI_OUT}/dev.kre_starscape --device tpu EXTRA -DSTDERR_CONTAINS=tpu)
+# Without the GPU build the message is the stub's, so the check is the word both messages share.
+starscape_cli_test(cli-device-gpu-disabled 1 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.toml -o ${CLI_OUT}/devg.kre_starscape --device gpu EXTRA -DSTDERR_CONTAINS=GPU)
+starscape_cli_test(cli-device-auto-disabled 0 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.toml -o ${CLI_OUT}/deva.kre_starscape --device auto EXTRA -DSTDOUT_CONTAINS=marching\ on\ the\ CPU)
+set_tests_properties(cli-device-gpu-disabled cli-device-auto-disabled PROPERTIES ENVIRONMENT STARSCAPE_GPU_DISABLE=1)
 
 add_test(NAME cli-determinism COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:starscape> -DSCENE=${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.toml
 	-DOUT=${CLI_OUT} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/expect_same.cmake)

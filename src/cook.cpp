@@ -1,4 +1,5 @@
 #include "cook.h"
+#include "gpu/march.h"
 #include "parallel.h"
 #include <kre_starscape.h>
 #include <algorithm>
@@ -7,6 +8,7 @@
 #include <cmath>
 #include <functional>
 #include <format>
+#include <memory>
 #include <glm/geometric.hpp>
 
 namespace starscape
@@ -194,7 +196,7 @@ private:
 // from that mean budget. The Poisson and star streams are keyed by texel and bin, never by pass, so a
 // texel's stars change only where its budget did.
 Expected<Cooked> Snapshot(Scene const& scene, PreparedScene const& prepared, MarchParams const& params, CookOptions const& options,
-	double fluxThreshold, bool budgetUnreachable, PassSums const& sums, int passes, int perAxis)
+	double fluxThreshold, bool budgetUnreachable, PassSums const& sums, int passes, int perAxis, std::string const& device)
 {
 	uint32_t const size = scene.output.faceSize;
 	uint32_t const texels = 6 * size * size;
@@ -212,6 +214,7 @@ Expected<Cooked> Snapshot(Scene const& scene, PreparedScene const& prepared, Mar
 	cooked.fluxThreshold = fluxThreshold;
 	cooked.stats.budgetUnreachable = budgetUnreachable;
 	cooked.passes = passes;
+	cooked.device = device;
 	// The sums hold Σ weight · x over `passes` of perAxis² rays; the mean over the rays so far is that times
 	// perAxis² / passes.
 	double const scale = double(perAxis * perAxis) / double(passes);
@@ -323,6 +326,33 @@ Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 		}
 	};
 
+	// The marcher is chosen first so a --device gpu that cannot be had fails before the calibration, not after it.
+	int const perAxis = params.samplesPerAxis;
+	int const passes = perAxis * perAxis;
+	int pass = 0;
+	auto marchProgress = [&](double done) { report("march", (double(pass) + done) / double(passes)); };
+	CpuMarcher cpu(prepared, params, options.threads, marchProgress);
+	std::unique_ptr<PassMarcher> gpuMarcher;
+	if (options.device != DeviceChoice::Cpu)
+	{
+		Expected<std::unique_ptr<PassMarcher>> opened = OpenGpuMarcher(prepared, params, size, marchProgress);
+		if (opened)
+		{
+			gpuMarcher = std::move(*opened);
+		}
+		else if (options.device == DeviceChoice::Gpu)
+		{
+			return std::unexpected(std::move(opened.error()));
+		}
+		else if (options.log)
+		{
+			options.log(std::format("marching on the CPU: {}", opened.error().message));
+		}
+	}
+	PassMarcher& marcher = gpuMarcher ? *gpuMarcher : static_cast<PassMarcher&>(cpu);
+	// ParallelFor treats 0 threads as one, so the name reports what actually runs. Task 7 replaces this with
+	// the marcher's own name.
+	std::string const deviceName = gpuMarcher ? std::string("GPU") : std::format("CPU, {} threads", std::max(1u, options.threads));
 	// 1. The flux threshold: given, or the one that leaves `target_stars` resolved.
 	double fluxThreshold = 0.0;
 	bool budgetUnreachable = false;
@@ -343,18 +373,13 @@ Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 	}
 
 	// 2. Passes: one ray per texel each, a complete sky after every one.
-	int const perAxis = params.samplesPerAxis;
-	int const passes = perAxis * perAxis;
 	PassSums sums{std::vector<glm::dvec3>(texels, glm::dvec3(0.0)), std::vector<std::array<float, kBins>>(texels)};
-	int pass = 0;
-	CpuMarcher cpu(prepared, params, options.threads, [&](double done) { report("march", (double(pass) + done) / double(passes)); });
-	PassMarcher& marcher = cpu;
 	Expected<Cooked> latest = InputError("no pass ran");
 	for (; pass < passes; ++pass)
 	{
 		PassSpec const spec{size, perAxis, PassStratum(perAxis, pass), fluxThreshold, scene.output.seed};
 		STARSCAPE_TRY(marcher.MarchPass(spec, sums));
-		latest = Snapshot(scene, prepared, params, options, fluxThreshold, budgetUnreachable, sums, pass + 1, perAxis);
+		latest = Snapshot(scene, prepared, params, options, fluxThreshold, budgetUnreachable, sums, pass + 1, perAxis, deviceName);
 		if (!latest)
 		{
 			return latest;

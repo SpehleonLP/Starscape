@@ -3,3 +3,5 @@ doctest.h     doctest v2.4.11       https://raw.githubusercontent.com/doctest/do
 glm/          glm 1.0.1 (light)     https://github.com/g-truc/glm/releases/download/1.0.1/glm-1.0.1-light.zip   sha256 9a995de4da09723bd33ef194e6b79818950e5a8f2e154792f02e4615277cfb8d
               (glm/copying.txt from https://raw.githubusercontent.com/g-truc/glm/1.0.1/copying.txt sha256 62d2d642c7d054d4fb4c9b42faad617d6c88fcd91e317f8035aa9f277cc159c3)
 LICENSE.txt   doctest v2.4.11's licence (MIT, the text doctest.h's header refers to), written from the standard MIT text with the copyright line from doctest.h; toml.hpp and glm/ carry their own.
+vulkan/       Vulkan-Headers v1.3.290   https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.3.290.tar.gz   sha256 f38a653bf93cab7a2a229a53d2d53b1cba9a2819e4c0a7de13c54085bde9bcf5 (include/vulkan, include/vk_video, LICENSE.md, LICENSES/)
+volk/         volk vulkan-sdk-1.3.290.0   https://github.com/zeux/volk/archive/refs/tags/vulkan-sdk-1.3.290.0.tar.gz   sha256 bb6a6d616c0f2bbd5d180da982a6d92a0948581cec937de69f17883980c6ca06 (volk.h, volk.c, LICENSE.md)

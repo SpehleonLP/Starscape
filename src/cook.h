@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -37,7 +38,10 @@ struct Cooked
 	double                  fluxThreshold = 0.0;
 	CookStats               stats;
 	int                     passes = 0;   // how many passes the snapshot holds
+	std::string             device;       // what marched, e.g. "CPU, 8 threads"
 };
+
+enum class DeviceChoice { Auto, Gpu, Cpu };
 
 struct CookOptions
 {
@@ -47,6 +51,8 @@ struct CookOptions
 	// Called after every pass with a complete sky; an error aborts the cook.
 	std::function<Expected<void>(Cooked const& cooked, int pass, int passes)> onPass{};
 	int                                                      stopAfterPasses = 0;   // test hook: 0 means all passes
+	DeviceChoice                                             device = DeviceChoice::Auto;
+	std::function<void(std::string_view)>                    log{};   // one line per notable choice, e.g. falling back to the CPU
 };
 
 // Same bound as the scene's target_stars. Past it a cook takes hours and writes a file nobody can load into a
