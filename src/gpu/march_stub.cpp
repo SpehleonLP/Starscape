@@ -4,7 +4,7 @@
 namespace starscape
 {
 
-Expected<std::unique_ptr<PassMarcher>> OpenGpuMarcher(PreparedScene const&, MarchParams const&, uint32_t, std::function<void(double)>)
+Expected<std::unique_ptr<PassMarcher>> OpenGpuMarcher(PreparedScene const&, MarchParams const&, uint32_t, std::function<void(double)>, double)
 {
 	return InputError("this build has no GPU march (built without glslangValidator)");
 }

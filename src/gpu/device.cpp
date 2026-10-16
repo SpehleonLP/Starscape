@@ -76,6 +76,19 @@ std::string Shortfall(DeviceFacts const& facts, DeviceOptions const& options)
 	return {};
 }
 
+std::string BufferShortfall(VkDeviceSize size, BufferLimits const& limits)
+{
+	if (size > limits.storageRange)
+	{
+		return std::format("the device's maxStorageBufferRange of {} bytes", limits.storageRange);
+	}
+	if (size > limits.allocation)
+	{
+		return std::format("the device's maxMemoryAllocationSize of {} bytes", limits.allocation);
+	}
+	return {};
+}
+
 namespace
 {
 
@@ -278,6 +291,11 @@ Expected<std::unique_ptr<Device>> OpenDevice(DeviceOptions const& options)
 	device->m_name = best->name;
 	device->m_driver = DriverString(*best);
 	vkGetPhysicalDeviceMemoryProperties(best->device, &device->m_memory);
+	// Maintenance3 is core in 1.1, and every device here is 1.2.
+	VkPhysicalDeviceMaintenance3Properties maintenance3{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES};
+	VkPhysicalDeviceProperties2 properties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &maintenance3};
+	vkGetPhysicalDeviceProperties2(best->device, &properties);
+	device->m_limits = {.storageRange = properties.properties.limits.maxStorageBufferRange, .allocation = maintenance3.maxMemoryAllocationSize};
 	vkGetDeviceQueue(device->m_device, best->queueFamily, 0, &device->m_queue);
 
 	VkCommandPoolCreateInfo const poolInfo{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,

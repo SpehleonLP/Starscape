@@ -7,6 +7,8 @@
 #include <cstring>
 #include <format>
 #include <span>
+#include <string>
+#include <utility>
 
 namespace starscape
 {
@@ -21,10 +23,33 @@ constexpr uint32_t kGroupSize = 8;       // march.comp's local_size_x and local_
 constexpr size_t   kMaxGalaxies = 16;    // march.comp's kMaxGalaxies: the size of its per-galaxy arrays
 constexpr uint32_t kSumsPerTexel = 3 + uint32_t(kBins);
 constexpr int      kFirstTileRows = 8;
-// march.comp's Pass block in scalar layout: mat3, ten uints, six floats. Vulkan guarantees only 128 bytes of
-// push constants on every device.
-constexpr uint32_t kPassBytes = 9 * 4 + 10 * 4 + 6 * 4;
-static_assert(kPassBytes < 128);
+
+// march.comp's Pass push-constant block. Every member is four bytes, so the scalar layout is this struct's: no
+// padding, and the size is checked where the compiler can see it.
+struct PassBlock
+{
+	std::array<float, 9> skyToScene;   // column-major, three tight vec3 columns
+	uint32_t             faceSize;
+	uint32_t             face;
+	uint32_t             rowBegin;
+	uint32_t             rowEnd;
+	uint32_t             stratumX;
+	uint32_t             stratumY;
+	uint32_t             perAxis;
+	uint32_t             galaxyCount;
+	uint32_t             seedLo;
+	uint32_t             seedHi;
+	float                fluxThreshold;
+	float                weight;
+	float                alpha;
+	float                dsMin;
+	float                dsMax;
+	float                sMin;
+};
+static_assert(sizeof(PassBlock) == 9 * 4 + 10 * 4 + 6 * 4, "PassBlock must match march.comp's scalar Pass block");
+// Vulkan guarantees only 128 bytes of push constants on every device.
+static_assert(sizeof(PassBlock) <= 128);
+constexpr uint32_t kPassBytes = sizeof(PassBlock);
 
 // Every earlier submission's writes, made visible to everything this one does. Submit waits on a fence between
 // submissions, but a fence orders execution only; the transfer and shader writes still need a memory dependency.
@@ -63,7 +88,7 @@ class GpuMarcher final : public PassMarcher
 {
 public:
 	GpuMarcher(std::unique_ptr<Device>&& device, PreparedScene const& prepared, MarchParams const& params, uint32_t faceSize,
-		std::function<void(double)>&& progress)
+		std::function<void(double)>&& progress, double tileSeconds)
 	: m_device(std::move(device))
 	, m_skyToScene(prepared.skyToScene)
 	, m_sMin(prepared.sMin)
@@ -71,6 +96,7 @@ public:
 	, m_faceSize(faceSize)
 	, m_galaxyCount(uint32_t(prepared.galaxies.size()))
 	, m_progress(std::move(progress))
+	, m_tileSeconds(tileSeconds)
 	{
 	}
 
@@ -117,6 +143,22 @@ public:
 			offsets[i] = total;
 			total += sizes[i];
 		}
+		VkDeviceSize const sumBytes = VkDeviceSize(m_faceSize) * m_faceSize * kSumsPerTexel * sizeof(float);
+
+		// Every storage buffer is bound whole, so each must fit one binding and one allocation; checked before any
+		// allocation, so a face too large for this device falls back to the CPU (or refuses) with the reason. The
+		// sums' staging buffer is the same size as the sums, and the upload's is the three small tables together.
+		std::array<std::pair<char const*, VkDeviceSize>, 4> const storage{{
+			{"galaxy", sizes[0]}, {"frame", sizes[1]}, {"population", sizes[2]}, {"face-sum", sumBytes}}};
+		for (auto const& [what, bytes] : storage)
+		{
+			std::string const over = gpu::BufferShortfall(bytes, m_device->Limits());
+			if (!over.empty())
+			{
+				return InputError(std::format("face size {} needs a {} byte {} buffer on the GPU, over {}", m_faceSize, bytes, what, over));
+			}
+		}
+
 		Scratch upload(*m_device);
 		STARSCAPE_TRY_ASSIGN(staging, m_device->CreateBuffer(total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true));
 		upload.buffer = staging;
@@ -131,7 +173,6 @@ public:
 			}
 		}
 
-		VkDeviceSize const sumBytes = VkDeviceSize(m_faceSize) * m_faceSize * kSumsPerTexel * sizeof(float);
 		STARSCAPE_TRY_ASSIGN(sums, m_device->CreateBuffer(sumBytes,
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, false));
 		m_buffers[3] = sums;
@@ -191,16 +232,16 @@ public:
 			for (uint32_t rowBegin = 0; rowBegin < size;)
 			{
 				uint32_t const rowEnd = std::min(rowBegin + uint32_t(m_rows), size);
-				STARSCAPE_TRY_ASSIGN(constants, PassConstants(spec, face, rowBegin, rowEnd));
+				PassBlock const constants = PassConstants(spec, face, rowBegin, rowEnd);
 				STARSCAPE_TRY_ASSIGN(seconds, m_device->Submit([&](VkCommandBuffer commands)
 				{
 					WaitForEarlierWrites(commands);
 					vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline);
 					vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 1, &m_set, 0, nullptr);
-					vkCmdPushConstants(commands, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, kPassBytes, constants.data());
+					vkCmdPushConstants(commands, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, kPassBytes, &constants);
 					vkCmdDispatch(commands, (size + kGroupSize - 1) / kGroupSize, (rowEnd - rowBegin + kGroupSize - 1) / kGroupSize, 1);
 				}));
-				m_rows = NextTileRows(m_rows, seconds, int(size));
+				m_rows = NextTileRows(m_rows, seconds, int(size), m_tileSeconds);
 				if (m_progress)
 				{
 					m_progress(double(face * size + rowEnd) / double(6 * size));
@@ -233,32 +274,33 @@ public:
 	}
 
 private:
-	// march.comp's Pass block, member by member.
-	Expected<std::vector<uint8_t>> PassConstants(PassSpec const& spec, uint32_t face, uint32_t rowBegin, uint32_t rowEnd) const
+	PassBlock PassConstants(PassSpec const& spec, uint32_t face, uint32_t rowBegin, uint32_t rowEnd) const
 	{
-		ScalarWriter w;
-		w.Mat3(m_skyToScene);
-		w.Uint(m_faceSize);
-		w.Uint(face);
-		w.Uint(rowBegin);
-		w.Uint(rowEnd);
-		w.Uint(uint32_t(spec.stratum.x));
-		w.Uint(uint32_t(spec.stratum.y));
-		w.Uint(uint32_t(spec.perAxis));
-		w.Uint(m_galaxyCount);
-		w.Uint(uint32_t(spec.seed));
-		w.Uint(uint32_t(spec.seed >> 32));
-		w.Float(spec.fluxThreshold);
-		w.Float(1.0 / double(spec.perAxis * spec.perAxis));
-		w.Float(m_params.alpha);
-		w.Float(m_params.dsMin);
-		w.Float(m_params.dsMax);
-		w.Float(m_sMin);
-		if (w.Bytes().size() != kPassBytes)
+		PassBlock block{};
+		for (int column = 0; column < 3; ++column)
 		{
-			return InputError(std::format("the GPU march's push constants are {} bytes, not the shader's {}", w.Bytes().size(), kPassBytes));
+			for (int row = 0; row < 3; ++row)
+			{
+				block.skyToScene[size_t(3 * column + row)] = float(m_skyToScene[column][row]);
+			}
 		}
-		return w.Bytes();
+		block.faceSize = m_faceSize;
+		block.face = face;
+		block.rowBegin = rowBegin;
+		block.rowEnd = rowEnd;
+		block.stratumX = uint32_t(spec.stratum.x);
+		block.stratumY = uint32_t(spec.stratum.y);
+		block.perAxis = uint32_t(spec.perAxis);
+		block.galaxyCount = m_galaxyCount;
+		block.seedLo = uint32_t(spec.seed);
+		block.seedHi = uint32_t(spec.seed >> 32);
+		block.fluxThreshold = float(spec.fluxThreshold);
+		block.weight = float(1.0 / double(spec.perAxis * spec.perAxis));
+		block.alpha = float(m_params.alpha);
+		block.dsMin = float(m_params.dsMin);
+		block.dsMax = float(m_params.dsMax);
+		block.sMin = float(m_sMin);
+		return block;
 	}
 
 	std::unique_ptr<Device>     m_device;
@@ -268,6 +310,7 @@ private:
 	uint32_t                    m_faceSize;
 	uint32_t                    m_galaxyCount;
 	std::function<void(double)> m_progress;
+	double                      m_tileSeconds;
 	// Galaxies, frames, populations, face sums: march.comp's bindings 0 to 3.
 	std::array<Buffer, 4>       m_buffers{};
 	Buffer                      m_staging;
@@ -283,14 +326,14 @@ private:
 }
 
 Expected<std::unique_ptr<PassMarcher>> OpenGpuMarcher(PreparedScene const& prepared, MarchParams const& params, uint32_t faceSize,
-	std::function<void(double)> progress)
+	std::function<void(double)> progress, double tileSeconds)
 {
 	STARSCAPE_TRY_ASSIGN(device, gpu::OpenDevice({}));
 	if (prepared.galaxies.size() > kMaxGalaxies)
 	{
 		return InputError(std::format("the GPU march takes at most {} galaxies; this scene has {}", kMaxGalaxies, prepared.galaxies.size()));
 	}
-	auto marcher = std::make_unique<GpuMarcher>(std::move(device), prepared, params, faceSize, std::move(progress));
+	auto marcher = std::make_unique<GpuMarcher>(std::move(device), prepared, params, faceSize, std::move(progress), tileSeconds);
 	STARSCAPE_TRY(marcher->Build(prepared));
 	return marcher;
 }

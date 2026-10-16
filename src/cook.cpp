@@ -120,10 +120,9 @@ glm::dvec3 SampleTexelDirection(uint32_t faceSize, uint32_t texel, RandomStream&
 	}
 }
 
-int NextTileRows(int rows, double seconds, int faceSize)
+int NextTileRows(int rows, double seconds, int faceSize, double target)
 {
-	constexpr double kTarget = 0.25;
-	double const scale = seconds > 0.0 ? std::min(2.0, kTarget / seconds) : 2.0;
+	double const scale = seconds > 0.0 ? std::min(2.0, target / seconds) : 2.0;
 	return std::clamp(int(double(rows) * scale), 1, faceSize);
 }
 
@@ -232,26 +231,35 @@ Expected<Cooked> Snapshot(Scene const& scene, PreparedScene const& prepared, Mar
 	// perAxis² / passes.
 	double const scale = double(perAxis * perAxis) / double(passes);
 	cooked.diffuse.resize(texels);
-	cooked.budget.resize(texels);
-	std::vector<std::array<float, kBins>>& budget = cooked.budget;
 	for (uint32_t texel = 0; texel < texels; ++texel)
 	{
 		cooked.diffuse[texel] = sums.radiance[texel] * scale;
-		for (int bin = 0; bin < kBins; ++bin)
+	}
+	// The mean budget is read straight from the sums rather than copied: at face 2048 a copy is 2.4 GB.
+	float const budgetScale = float(scale);
+	auto meanBudget = [&](uint32_t texel, int bin) { return sums.budget[texel][size_t(bin)] * budgetScale; };
+	if (options.keepBudget)
+	{
+		cooked.budget.resize(texels);
+		for (uint32_t texel = 0; texel < texels; ++texel)
 		{
-			budget[texel][size_t(bin)] = sums.budget[texel][size_t(bin)] * float(scale);
+			for (int bin = 0; bin < kBins; ++bin)
+			{
+				cooked.budget[texel][size_t(bin)] = meanBudget(texel, bin);
+			}
 		}
 	}
 
 	// The budget is known before any star is drawn, so an absurd threshold fails here rather than hours later.
 	double expectedStars = 0.0;
 	double largestBin = 0.0;
-	for (std::array<float, kBins> const& texelBudget : budget)
+	for (uint32_t texel = 0; texel < texels; ++texel)
 	{
-		for (float const count : texelBudget)
+		for (int bin = 0; bin < kBins; ++bin)
 		{
-			expectedStars += double(count);
-			largestBin = std::max(largestBin, double(count));
+			double const count = double(meanBudget(texel, bin));
+			expectedStars += count;
+			largestBin = std::max(largestBin, count);
 		}
 	}
 	double const magnitude = -2.5 * std::log10(cooked.fluxThreshold);
@@ -274,7 +282,7 @@ Expected<Cooked> Snapshot(Scene const& scene, PreparedScene const& prepared, Mar
 		for (int bin = 0; bin < kBins; ++bin)
 		{
 			RandomStream poisson(seed, Purpose::Poisson, texel, uint32_t(bin), 0);
-			uint32_t const count = SamplePoisson(budget[texel][size_t(bin)], poisson);
+			uint32_t const count = SamplePoisson(meanBudget(texel, bin), poisson);
 			for (uint32_t index = 0; index < count; ++index)
 			{
 				RandomStream rng(seed, Purpose::Star, texel, uint32_t(bin), index);
@@ -386,16 +394,15 @@ Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 
 	// 2. Passes: one ray per texel each, a complete sky after every one.
 	PassSums sums{std::vector<glm::dvec3>(texels, glm::dvec3(0.0)), std::vector<std::array<float, kBins>>(texels)};
-	Expected<Cooked> latest = InputError("no pass ran");
+	std::optional<Cooked> latest;
 	for (; pass < passes; ++pass)
 	{
 		PassSpec const spec{size, perAxis, PassStratum(perAxis, pass), fluxThreshold, scene.output.seed};
 		STARSCAPE_TRY(marcher.MarchPass(spec, sums));
-		latest = Snapshot(scene, prepared, params, options, fluxThreshold, budgetUnreachable, sums, pass + 1, perAxis, deviceName);
-		if (!latest)
-		{
-			return latest;
-		}
+		// The last snapshot goes before the next is built, so two skies (gigabytes each at face 2048) never coexist.
+		latest.reset();
+		STARSCAPE_TRY_ASSIGN(snapshot, Snapshot(scene, prepared, params, options, fluxThreshold, budgetUnreachable, sums, pass + 1, perAxis, deviceName));
+		latest = std::move(snapshot);
 		if (options.onPass)
 		{
 			STARSCAPE_TRY(options.onPass(*latest, pass + 1, passes));
@@ -405,7 +412,11 @@ Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 			break;
 		}
 	}
-	return latest;
+	if (!latest)
+	{
+		return InputError("no pass ran");
+	}
+	return std::move(*latest);
 }
 
 }

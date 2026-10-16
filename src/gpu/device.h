@@ -28,6 +28,17 @@ struct DeviceFacts
 // The first requirement `facts` misses, worded to follow "lacks"; empty when the device qualifies.
 std::string Shortfall(DeviceFacts const& facts, DeviceOptions const& options);
 
+// The largest buffers a device takes. Vulkan guarantees only 2^27 bytes of storage-buffer range, and drivers
+// report anything from 128 MiB up, while the face sums alone are 453 MB at face 2048.
+struct BufferLimits
+{
+	VkDeviceSize storageRange = 0;   // maxStorageBufferRange: the most one storage-buffer binding can see
+	VkDeviceSize allocation = 0;     // maxMemoryAllocationSize: the most one allocation can hold
+};
+
+// The limit a storage buffer of `size` bytes exceeds, worded to follow "over"; empty when it fits.
+std::string BufferShortfall(VkDeviceSize size, BufferLimits const& limits);
+
 struct Buffer
 {
 	VkBuffer       buffer = VK_NULL_HANDLE;
@@ -49,6 +60,7 @@ public:
 	VkDevice Handle() const { return m_device; }
 	// True only when the queue was created with the LOW global priority request.
 	bool LowPriority() const { return m_lowPriority; }
+	BufferLimits const& Limits() const { return m_limits; }
 	// Nanoseconds per timestamp tick, for shaders' timestamp queries.
 	float TimestampPeriod() const { return m_timestampPeriod; }
 
@@ -86,6 +98,7 @@ private:
 	uint32_t         m_queueFamily = 0;
 	float            m_timestampPeriod = 1.0f;
 	bool             m_lowPriority = false;
+	BufferLimits     m_limits;
 	VkPhysicalDeviceMemoryProperties m_memory{};
 	std::string      m_name;
 	std::string      m_driver;

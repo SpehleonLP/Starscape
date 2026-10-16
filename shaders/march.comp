@@ -134,19 +134,23 @@ void main()
 		{
 			anchor[g] = frames[g].localOrigin + begins[i] * dirLocal[g];
 		}
-		float sNow = begins[i];
-		while (sNow < ends[i])
+		// Distance is carried from the interval's start (spec §3): near the observer's end of a stretch 790 kpc out a float
+		// offset keeps every step's width, where an absolute float distance there resolves only 0.06 pc of a 25 pc step.
+		const float stretch = ends[i] - begins[i];
+		float t = 0.0;
+		while (t < stretch)
 		{
-			const float remaining = ends[i] - sNow;
+			const float sNow = begins[i] + t;
+			const float remaining = stretch - t;
 			const float ds = min(clamp(pass.alpha * sNow, pass.dsMin, pass.dsMax), remaining);
-			const float mid = sNow + 0.5 * ds;
+			const float mid = t + 0.5 * ds;
 			float extinction = 0.0;
 			vec3 gas = vec3(0.0);
 			int partCount = 0;
 			// Every galaxy's extinction is summed before any part sees the step's transmittance, as on the CPU.
 			for (uint g = 0u; g < pass.galaxyCount; ++g)
 			{
-				const vec3 p = anchor[g] + (mid - begins[i]) * dirLocal[g];
+				const vec3 p = anchor[g] + mid * dirLocal[g];
 				if (dot(p, p) > frames[g].boundRadius * frames[g].boundRadius)
 				{
 					continue;
@@ -169,13 +173,13 @@ void main()
 					transmittance, pass.weight, solid, result);
 			}
 			depth += extinction * ds;
-			const float next = ds == remaining ? ends[i] : sNow + ds;
-			// A step too small to move the float position would loop forever; end the stretch instead.
-			if (next <= sNow)
+			const float next = ds == remaining ? stretch : t + ds;
+			// A step too small to move the float offset would loop forever; end the stretch instead.
+			if (next <= t)
 			{
 				break;
 			}
-			sNow = next;
+			t = next;
 		}
 	}
 

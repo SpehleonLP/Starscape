@@ -61,6 +61,14 @@ FIELD_INLINE real CubeSpan(real x, real y)
 	return (y - x) * (x * x + x * y + y * y) / 3.0;
 }
 
+// CubeSpan(x, x + w) from the width itself: far from the observer a float b − a keeps only a few bits of a short
+// step, while the step's own width is exact.
+FIELD_INLINE real CubeSpanFrom(real x, real w)
+{
+	const real y = x + w;
+	return w * (x * x + x * y + y * y) / 3.0;
+}
+
 // The first bin whose luminosity is not below `minLuminosity`; luminosities ascend.
 FIELD_INLINE int FirstResolvedBin(IN(PopulationTable) population, real minLuminosity)
 {
@@ -97,7 +105,7 @@ FIELD_INLINE void AccumulatePart(IN(PopulationTable) population, real density, r
 	for (int bin = splitB; bin < kBins; ++bin)
 	{
 		const real f = population.fraction[bin];
-		result.budget[bin] += density * f * sampleSolidAngle * CubeSpan(a, b);
+		result.budget[bin] += density * f * sampleSolidAngle * CubeSpanFrom(a, ds);
 		result.resolvedRadiance += (lightScale * ds) * (transmittance * population.chroma[bin] * (f * population.luminosity[bin]));
 	}
 }

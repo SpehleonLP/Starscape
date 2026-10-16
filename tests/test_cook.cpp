@@ -383,6 +383,7 @@ TEST_CASE("Progressive passes average the same rays as one batch")
 	CookOptions options;
 	options.device = DeviceChoice::Cpu;
 	options.threads = 4;
+	options.keepBudget = true;
 	options.onPass = [&](Cooked const& cooked, int pass, int passes) -> Expected<void>
 	{
 		CHECK(pass == int(snapshots.size()) + 1);

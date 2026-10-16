@@ -86,3 +86,16 @@ TEST_CASE("Each other requirement is named when missing")
 	noScalar.scalarBlockLayout = false;
 	CHECK(Shortfall(noScalar, {}).find("scalarBlockLayout") != std::string::npos);
 }
+
+TEST_CASE("A buffer over either limit is refused, naming the limit; one within both fits")
+{
+	// Mutation: dropping either comparison in BufferShortfall lets the matching over-limit buffer through.
+	BufferLimits const limits{.storageRange = VkDeviceSize(1) << 27, .allocation = VkDeviceSize(1) << 30};
+	CHECK(BufferShortfall(VkDeviceSize(1) << 26, limits).empty());
+	CHECK(BufferShortfall(VkDeviceSize(1) << 27, limits).empty());   // exactly the limit fits
+	CHECK(BufferShortfall((VkDeviceSize(1) << 27) + 1, limits).find("maxStorageBufferRange") != std::string::npos);
+	BufferLimits const smallAllocation{.storageRange = VkDeviceSize(1) << 32, .allocation = VkDeviceSize(1) << 27};
+	CHECK(BufferShortfall((VkDeviceSize(1) << 27) + 1, smallAllocation).find("maxMemoryAllocationSize") != std::string::npos);
+	// Face 2048's sums, 2048² × 27 × 4 bytes, against the guaranteed minimum range.
+	CHECK_FALSE(BufferShortfall(VkDeviceSize(2048) * 2048 * 27 * 4, limits).empty());
+}

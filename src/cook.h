@@ -40,6 +40,7 @@ struct Cooked
 	int                     passes = 0;   // how many passes the snapshot holds
 	std::string             device;       // what marched, e.g. "CPU, 8 threads"
 	// Expected resolved stars per texel and bin, the mean of the passes so far: what the stars were drawn from.
+	// Empty unless CookOptions::keepBudget asked for it; at face 2048 it is 2.4 GB.
 	std::vector<std::array<float, kBins>> budget;
 };
 
@@ -55,6 +56,7 @@ struct CookOptions
 	int                                                      stopAfterPasses = 0;   // test hook: 0 means all passes
 	DeviceChoice                                             device = DeviceChoice::Auto;
 	std::function<void(std::string_view)>                    log{};   // one line per notable choice, e.g. falling back to the CPU
+	bool                                                     keepBudget = false;   // fill Cooked::budget (tests compare it)
 };
 
 // Same bound as the scene's target_stars. Past it a cook takes hours and writes a file nobody can load into a
@@ -101,8 +103,10 @@ public:
 	virtual std::string Name() const = 0;
 };
 
-// The next dispatch's rows: scaled toward 0.25 s, at most doubling, clamped to [1, faceSize].
-int NextTileRows(int rows, double seconds, int faceSize);
+// A GPU dispatch's target duration: short enough to keep the desktop responsive and the driver's watchdog quiet.
+inline constexpr double kTileSeconds = 0.25;
+// The next dispatch's rows: scaled toward `target` seconds, at most doubling, clamped to [1, faceSize].
+int NextTileRows(int rows, double seconds, int faceSize, double target = kTileSeconds);
 
 // An input error when the threshold would resolve more than kMaxStars points.
 Expected<Cooked> Cook(Scene const& scene, CookOptions const& options);
