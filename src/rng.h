@@ -43,10 +43,11 @@ enum class Purpose : uint32_t
 class RandomStream
 {
 public:
-	// `c` must fit in 24 bits: the purpose occupies the top byte of its counter word.
-	RandomStream(uint64_t seed, Purpose purpose, uint32_t a, uint32_t b, uint32_t c)
+	// `c` must fit in 24 bits: the purpose occupies the top byte of its counter word. `block` starts the
+	// stream that many Philox blocks in, so a pass can draw stratum k's sample without replaying 0..k-1.
+	RandomStream(uint64_t seed, Purpose purpose, uint32_t a, uint32_t b, uint32_t c, uint32_t block = 0)
 	: m_key{uint32_t(seed), uint32_t(seed >> 32)}
-	, m_counter{a, b, (uint32_t(purpose) << 24) | (c & 0x00FFFFFFu), 0u}
+	, m_counter{a, b, (uint32_t(purpose) << 24) | (c & 0x00FFFFFFu), block}
 	{
 	}
 

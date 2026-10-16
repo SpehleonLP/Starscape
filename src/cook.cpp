@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <functional>
 #include <format>
 #include <glm/geometric.hpp>
 
@@ -34,6 +35,30 @@ glm::dvec3 FaceDirection(uint32_t face, double s, double t)
 	return glm::normalize(glm::dvec3(d[0], d[1], d[2]));
 }
 
+}
+
+Stratum PassStratum(int perAxis, int pass)
+{
+	// Each pair of pass bits picks a quadrant at the next finer scale: the low bit picks the column and its
+	// XOR with the high bit picks the row, so passes 0 and 1 land in opposite quadrants.
+	Stratum s{0, 0};
+	int scale = perAxis / 2;
+	for (int bits = pass; scale > 0; bits >>= 2, scale /= 2)
+	{
+		int const column = bits & 1;
+		int const row = column ^ ((bits >> 1) & 1);
+		s.x += column * scale;
+		s.y += row * scale;
+	}
+	return s;
+}
+
+glm::dvec3 TexelJitterDirection(uint32_t faceSize, uint32_t texel, int perAxis, Stratum s, double u, double v)
+{
+	TexelCoord const c = Decompose(faceSize, texel);
+	double const sx = (c.x + (s.x + u) / perAxis) / faceSize;
+	double const ty = (c.y + (s.y + v) / perAxis) / faceSize;
+	return FaceDirection(c.face, sx, ty);
 }
 
 glm::dvec3 TexelCentre(uint32_t faceSize, uint32_t texel)
@@ -116,11 +141,61 @@ FluxHistogram CalibrationHistogram(PreparedScene const& scene, MarchParams const
 	return total;
 }
 
-Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
+namespace
 {
-	Quality const quality = options.quality.value_or(scene.output.quality);
-	MarchParams const params = ParamsFor(quality);
-	PreparedScene const prepared = PrepareScene(scene);
+
+class CpuMarcher final : public PassMarcher
+{
+public:
+	CpuMarcher(PreparedScene const& prepared, MarchParams const& params, unsigned threads, std::function<void(double)> progress)
+	: m_prepared(prepared), m_params(params), m_threads(threads), m_progress(std::move(progress))
+	{
+	}
+
+	Expected<void> MarchPass(PassSpec const& spec, PassSums& sums) override
+	{
+		uint32_t const size = spec.faceSize;
+		uint32_t const texels = 6 * size * size;
+		double const weight = 1.0 / double(spec.perAxis * spec.perAxis);
+		uint32_t const stratumIndex = uint32_t(spec.stratum.y * spec.perAxis + spec.stratum.x);
+		ParallelFor(texels, m_threads, [&](uint32_t texel)
+		{
+			TexelCoord const c = Decompose(size, texel);
+			// The block a nested-loop draw of stratum k reached: each sample takes one Philox block.
+			RandomStream rng(spec.seed, Purpose::Jitter, texel, 0, 0, stratumIndex);
+			double const u = rng.NextDouble();
+			double const v = rng.NextDouble();
+			RayResult result;
+			MarchRay(m_prepared, m_params, TexelJitterDirection(size, texel, spec.perAxis, spec.stratum, u, v), spec.fluxThreshold,
+				kre_starscape::TexelSolidAngle(size, c.x, c.y) * weight, weight, result);
+			sums.radiance[texel] += result.radiance;
+			for (int bin = 0; bin < kBins; ++bin)
+			{
+				sums.budget[texel][size_t(bin)] += float(result.budget[size_t(bin)]);
+			}
+		}, [&](uint32_t done)
+		{
+			if (m_progress)
+			{
+				m_progress(double(done) / double(texels));
+			}
+		});
+		return {};
+	}
+
+private:
+	PreparedScene const&        m_prepared;
+	MarchParams                 m_params;
+	unsigned                    m_threads;
+	std::function<void(double)> m_progress;
+};
+
+// A complete sky from the passes so far: the sums scaled to their mean, the bound checks, and stars drawn
+// from that mean budget. The Poisson and star streams are keyed by texel and bin, never by pass, so a
+// texel's stars change only where its budget did.
+Expected<Cooked> Snapshot(Scene const& scene, PreparedScene const& prepared, MarchParams const& params, CookOptions const& options,
+	double fluxThreshold, bool budgetUnreachable, PassSums const& sums, int passes, int perAxis)
+{
 	uint32_t const size = scene.output.faceSize;
 	uint32_t const texels = 6 * size * size;
 	uint64_t const seed = scene.output.seed;
@@ -134,50 +209,22 @@ Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 
 	Cooked cooked;
 	cooked.faceSize = size;
-
-	// 1. The flux threshold: given, or the one that leaves `target_stars` resolved.
-	if (scene.output.limitingMagnitude)
-	{
-		cooked.fluxThreshold = std::pow(10.0, -0.4 * *scene.output.limitingMagnitude);
-	}
-	else
-	{
-		MarchParams calibration = params;
-		calibration.samplesPerAxis = 1;
-		report("calibrate", 0, 1);
-		FluxHistogram const histogram = CalibrationHistogram(prepared, calibration, kCalibrationFaceSize, options.threads);
-		std::optional<double> const threshold = histogram.FluxForCount(double(scene.output.targetStars.value_or(0)));
-		cooked.stats.budgetUnreachable = !threshold.has_value();
-		cooked.fluxThreshold = threshold.value_or(std::pow(10.0, FluxHistogram::kLogMin));
-		report("calibrate", 1, 1);
-	}
-
-	// 2. Diffuse radiance and the per-bin point budget, one texel per slot.
-	cooked.diffuse.assign(texels, glm::dvec3(0.0));
+	cooked.fluxThreshold = fluxThreshold;
+	cooked.stats.budgetUnreachable = budgetUnreachable;
+	cooked.passes = passes;
+	// The sums hold Σ weight · x over `passes` of perAxis² rays; the mean over the rays so far is that times
+	// perAxis² / passes.
+	double const scale = double(perAxis * perAxis) / double(passes);
+	cooked.diffuse.resize(texels);
 	std::vector<std::array<float, kBins>> budget(texels);
-	int const perAxis = params.samplesPerAxis;
-	double const weight = 1.0 / double(perAxis * perAxis);
-	ParallelFor(texels, options.threads, [&](uint32_t texel)
+	for (uint32_t texel = 0; texel < texels; ++texel)
 	{
-		TexelCoord const c = Decompose(size, texel);
-		double const sampleSolidAngle = kre_starscape::TexelSolidAngle(size, c.x, c.y) * weight;
-		RandomStream rng(seed, Purpose::Jitter, texel, 0, 0);
-		RayResult result;
-		for (int j = 0; j < perAxis; ++j)
-		{
-			for (int i = 0; i < perAxis; ++i)
-			{
-				double const s = (c.x + (i + rng.NextDouble()) / perAxis) / size;
-				double const t = (c.y + (j + rng.NextDouble()) / perAxis) / size;
-				MarchRay(prepared, params, FaceDirection(c.face, s, t), cooked.fluxThreshold, sampleSolidAngle, weight, result);
-			}
-		}
-		cooked.diffuse[texel] = result.radiance;
+		cooked.diffuse[texel] = sums.radiance[texel] * scale;
 		for (int bin = 0; bin < kBins; ++bin)
 		{
-			budget[texel][size_t(bin)] = float(result.budget[size_t(bin)]);
+			budget[texel][size_t(bin)] = sums.budget[texel][size_t(bin)] * float(scale);
 		}
-	}, [&](uint32_t done) { report("march", done, texels); });
+	}
 
 	// The budget is known before any star is drawn, so an absurd threshold fails here rather than hours later.
 	double expectedStars = 0.0;
@@ -257,6 +304,71 @@ Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 	cooked.stats.starCount = cooked.stars.size();
 	cooked.stats.droppedStars = dropped.load();
 	return cooked;
+}
+
+}
+
+Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
+{
+	Quality const quality = options.quality.value_or(scene.output.quality);
+	MarchParams const params = ParamsFor(quality);
+	PreparedScene const prepared = PrepareScene(scene);
+	uint32_t const size = scene.output.faceSize;
+	uint32_t const texels = 6 * size * size;
+	auto report = [&](std::string_view phase, double done)
+	{
+		if (options.progress)
+		{
+			options.progress(phase, done);
+		}
+	};
+
+	// 1. The flux threshold: given, or the one that leaves `target_stars` resolved.
+	double fluxThreshold = 0.0;
+	bool budgetUnreachable = false;
+	if (scene.output.limitingMagnitude)
+	{
+		fluxThreshold = std::pow(10.0, -0.4 * *scene.output.limitingMagnitude);
+	}
+	else
+	{
+		MarchParams calibration = params;
+		calibration.samplesPerAxis = 1;
+		report("calibrate", 0.0);
+		FluxHistogram const histogram = CalibrationHistogram(prepared, calibration, kCalibrationFaceSize, options.threads);
+		std::optional<double> const threshold = histogram.FluxForCount(double(scene.output.targetStars.value_or(0)));
+		budgetUnreachable = !threshold.has_value();
+		fluxThreshold = threshold.value_or(std::pow(10.0, FluxHistogram::kLogMin));
+		report("calibrate", 1.0);
+	}
+
+	// 2. Passes: one ray per texel each, a complete sky after every one.
+	int const perAxis = params.samplesPerAxis;
+	int const passes = perAxis * perAxis;
+	PassSums sums{std::vector<glm::dvec3>(texels, glm::dvec3(0.0)), std::vector<std::array<float, kBins>>(texels)};
+	int pass = 0;
+	CpuMarcher cpu(prepared, params, options.threads, [&](double done) { report("march", (double(pass) + done) / double(passes)); });
+	PassMarcher& marcher = cpu;
+	Expected<Cooked> latest = InputError("no pass ran");
+	for (; pass < passes; ++pass)
+	{
+		PassSpec const spec{size, perAxis, PassStratum(perAxis, pass), fluxThreshold, scene.output.seed};
+		STARSCAPE_TRY(marcher.MarchPass(spec, sums));
+		latest = Snapshot(scene, prepared, params, options, fluxThreshold, budgetUnreachable, sums, pass + 1, perAxis);
+		if (!latest)
+		{
+			return latest;
+		}
+		if (options.onPass)
+		{
+			STARSCAPE_TRY(options.onPass(*latest, pass + 1, passes));
+		}
+		if (options.stopAfterPasses > 0 && pass + 1 >= options.stopAfterPasses)
+		{
+			break;
+		}
+	}
+	return latest;
 }
 
 }

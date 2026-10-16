@@ -1,8 +1,10 @@
 #pragma once
 #include "common.h"
 #include "march.h"
+#include "population.h"
 #include "rng.h"
 #include "scene.h"
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -34,6 +36,7 @@ struct Cooked
 	std::vector<CookedStar> stars;     // brightest first
 	double                  fluxThreshold = 0.0;
 	CookStats               stats;
+	int                     passes = 0;   // how many passes the snapshot holds
 };
 
 struct CookOptions
@@ -41,12 +44,52 @@ struct CookOptions
 	unsigned                                                 threads = 1;
 	std::optional<Quality>                                   quality{};    // overrides the scene's
 	std::function<void(std::string_view phase, double done)> progress{};
+	// Called after every pass with a complete sky; an error aborts the cook.
+	std::function<Expected<void>(Cooked const& cooked, int pass, int passes)> onPass{};
+	int                                                      stopAfterPasses = 0;   // test hook: 0 means all passes
 };
 
 // Same bound as the scene's target_stars. Past it a cook takes hours and writes a file nobody can load into a
 // sky, and the per-texel-bin star index would outgrow the 24 bits the random stream gives it.
 inline constexpr double kMaxStars = 1.0e7;
 inline constexpr double kMaxStarsPerTexelBin = double(1u << 24) - double(1u << 20);
+
+struct Stratum
+{
+	int x;
+	int y;
+};
+// Pass `pass` of perAxis² visits this stratum; every prefix of passes stays spread over the texel.
+// perAxis must be a power of two.
+Stratum PassStratum(int perAxis, int pass);
+
+// The direction of the ray through stratum `s` of `texel`, jittered by (u, v) in [0, 1).
+glm::dvec3 TexelJitterDirection(uint32_t faceSize, uint32_t texel, int perAxis, Stratum s, double u, double v);
+
+// The running sums a pass adds to: per texel, Σ weight · radiance and Σ budget.
+struct PassSums
+{
+	std::vector<glm::dvec3>               radiance;
+	std::vector<std::array<float, kBins>> budget;
+};
+
+// What a pass needs to fire one ray per texel.
+struct PassSpec
+{
+	uint32_t faceSize;
+	int      perAxis;
+	Stratum  stratum;
+	double   fluxThreshold;
+	uint64_t seed;
+};
+
+// Fires one ray per texel through `spec.stratum` and adds it to `sums`. The CPU and GPU march implement it.
+class PassMarcher
+{
+public:
+	virtual ~PassMarcher() = default;
+	virtual Expected<void> MarchPass(PassSpec const& spec, PassSums& sums) = 0;
+};
 
 // An input error when the threshold would resolve more than kMaxStars points.
 Expected<Cooked> Cook(Scene const& scene, CookOptions const& options);

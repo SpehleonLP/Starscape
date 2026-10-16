@@ -5,7 +5,9 @@
 #include <kre_starscape.h>
 #include <doctest.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <set>
 #include <thread>
 
 using namespace starscape;
@@ -318,4 +320,148 @@ TEST_CASE("Poisson draws far past uint32 stay near the largest count instead of 
 			CHECK(k > 4000000000u);
 		}
 	}
+}
+
+TEST_CASE("Passes visit every stratum once and every prefix stays spread")
+{
+	// Mutation: qy = p₁ without the XOR with p₀ makes passes 0 and 1 share a row.
+	std::set<std::pair<int, int>> seen;
+	for (int pass = 0; pass < 16; ++pass)
+	{
+		Stratum const s = PassStratum(4, pass);
+		CHECK(s.x >= 0);
+		CHECK(s.x < 4);
+		CHECK(s.y >= 0);
+		CHECK(s.y < 4);
+		seen.insert({s.x, s.y});
+	}
+	CHECK(seen.size() == 16);
+	Stratum const first = PassStratum(4, 0);
+	Stratum const second = PassStratum(4, 1);
+	CHECK(first.x / 2 != second.x / 2);
+	CHECK(first.y / 2 != second.y / 2);
+	std::array<int, 4> quadrants{};
+	for (int pass = 0; pass < 8; ++pass)
+	{
+		Stratum const s = PassStratum(4, pass);
+		++quadrants[size_t((s.y / 2) * 2 + s.x / 2)];
+		if (pass == 3)
+		{
+			CHECK(quadrants == std::array<int, 4>{1, 1, 1, 1});
+		}
+	}
+	CHECK(quadrants == std::array<int, 4>{2, 2, 2, 2});
+	CHECK(PassStratum(1, 0).x == 0);
+	CHECK(PassStratum(1, 0).y == 0);
+}
+
+namespace
+{
+
+Scene SmallFinalScene()
+{
+	Scene scene = BaseScene();
+	int const population = AddSingleBinPopulation(scene, 12);
+	scene.galaxies.push_back(UniformBall(0.02, 400.0, population, {0.0, 0.0, 0.0}));
+	scene.output.faceSize = 8;
+	scene.output.quality = Quality::Final;
+	scene.output.limitingMagnitude = 4.0;
+	return scene;
+}
+
+}
+
+TEST_CASE("Progressive passes average the same rays as one batch")
+{
+	// Mutation: scaling the sums by S² instead of S²/n leaves a partial cook n/S² too dark; the full cook still
+	// matches, so the partial check is what reddens.
+	Scene const scene = SmallFinalScene();
+	PreparedScene const prepared = PrepareScene(scene);
+	MarchParams const params = ParamsFor(Quality::Final);
+	std::vector<Cooked> snapshots;
+	CookOptions options;
+	options.threads = 4;
+	options.onPass = [&](Cooked const& cooked, int pass, int passes) -> Expected<void>
+	{
+		CHECK(pass == int(snapshots.size()) + 1);
+		CHECK(passes == 16);
+		snapshots.push_back(cooked);
+		return {};
+	};
+	Expected<Cooked> const cooked = Cook(scene, options);
+	REQUIRE(cooked.has_value());
+	REQUIRE(snapshots.size() == 16);
+	uint32_t const size = scene.output.faceSize;
+	for (uint32_t texel = 0; texel < 6 * size * size; texel += 37)
+	{
+		// The batch mean of the same 16 rays, in the old nested-loop order.
+		RandomStream rng(scene.output.seed, Purpose::Jitter, texel, 0, 0);
+		RayResult batch;
+		double const solid = 0.0;   // radiance does not depend on it
+		for (int j = 0; j < 4; ++j)
+		{
+			for (int i = 0; i < 4; ++i)
+			{
+				double const u = rng.NextDouble();
+				double const v = rng.NextDouble();
+				glm::dvec3 const dir = TexelJitterDirection(size, texel, 4, Stratum{i, j}, u, v);
+				MarchRay(prepared, params, dir, cooked->fluxThreshold, solid, 1.0 / 16.0, batch);
+			}
+		}
+		glm::dvec3 const full = cooked->diffuse[texel];
+		CHECK(full.x == doctest::Approx(batch.radiance.x).epsilon(1e-12));
+		CHECK(full.y == doctest::Approx(batch.radiance.y).epsilon(1e-12));
+		CHECK(full.z == doctest::Approx(batch.radiance.z).epsilon(1e-12));
+		// After four passes, the mean of the first four strata in pass order.
+		RayResult four;
+		for (int pass = 0; pass < 4; ++pass)
+		{
+			Stratum const s = PassStratum(4, pass);
+			RandomStream at(scene.output.seed, Purpose::Jitter, texel, 0, 0, uint32_t(4 * s.y + s.x));
+			double const u = at.NextDouble();
+			double const v = at.NextDouble();
+			MarchRay(prepared, params, TexelJitterDirection(size, texel, 4, s, u, v), cooked->fluxThreshold, solid, 1.0 / 4.0, four);
+		}
+		CHECK(snapshots[3].diffuse[texel].y == doctest::Approx(four.radiance.y).epsilon(1e-12));
+	}
+}
+
+TEST_CASE("A cook stopped after a pass leaves a whole sky of the passes so far")
+{
+	// Mutation: returning before the stars are drawn for the snapshot leaves the stopped cook without stars.
+	Scene const scene = SmallFinalScene();
+	CookOptions options;
+	options.threads = 2;
+	options.stopAfterPasses = 4;
+	int calls = 0;
+	options.onPass = [&](Cooked const&, int, int) -> Expected<void>
+	{
+		++calls;
+		return {};
+	};
+	Expected<Cooked> const stopped = Cook(scene, options);
+	REQUIRE(stopped.has_value());
+	CHECK(calls == 4);
+	CHECK(stopped->passes == 4);
+	CHECK(stopped->stats.starCount > 0);
+	std::vector<uint8_t> const bytes = BuildFile(*stopped, scene.hash);
+	kre_starscape::View view;
+	CHECK(kre_starscape::Parse(bytes, view) == kre_starscape::Result::Ok);
+}
+
+TEST_CASE("An error from onPass ends the cook")
+{
+	// Mutation: ignoring onPass's result keeps cooking after a failed write.
+	Scene const scene = SmallFinalScene();
+	CookOptions options;
+	int calls = 0;
+	options.onPass = [&](Cooked const&, int, int) -> Expected<void>
+	{
+		++calls;
+		return IoError("disk full");
+	};
+	Expected<Cooked> const result = Cook(scene, options);
+	REQUIRE_FALSE(result.has_value());
+	CHECK(result.error().message == "disk full");
+	CHECK(calls == 1);
 }

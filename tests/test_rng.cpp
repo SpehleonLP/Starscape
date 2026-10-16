@@ -43,3 +43,21 @@ TEST_CASE("RandomStream doubles are uniform in [0, 1)")
 	CHECK(sum / n == doctest::Approx(0.5).epsilon(0.01));
 	CHECK(sumSquares / n == doctest::Approx(1.0 / 3.0).epsilon(0.01));
 }
+
+TEST_CASE("A stream started at block k continues the stream that reached block k")
+{
+	// Mutation: starting the counter at 2k instead of k breaks the match from the first word.
+	for (uint32_t k = 0; k < 16; ++k)
+	{
+		RandomStream whole(42, Purpose::Jitter, 7, 0, 0);
+		for (uint32_t skip = 0; skip < 4 * k; ++skip)
+		{
+			whole.NextU32();
+		}
+		RandomStream started(42, Purpose::Jitter, 7, 0, 0, k);
+		for (int word = 0; word < 8; ++word)
+		{
+			CHECK(started.NextU32() == whole.NextU32());
+		}
+	}
+}

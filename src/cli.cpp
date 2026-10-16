@@ -204,20 +204,37 @@ int Cook(Arguments const& args)
 		}
 		Log(std::format("{} {}%{}", phase, percent, eta));
 	};
+	// Every pass leaves a loadable sky, so a cook that is stopped keeps its latest pass.
+	auto writeSky = [&](Cooked const& cooked) -> Expected<void>
+	{
+		std::vector<uint8_t> const bytes = BuildFile(cooked, scene->hash);
+		STARSCAPE_TRY(WriteFileAtomic(std::string(*args.output), bytes));
+		if (args.preview && !scene->output.previewMarch)
+		{
+			kre_starscape::View view;
+			kre_starscape::Parse(bytes, view);
+			Image const image = RenderPreview(view, scene->output.previewWidth, 0.0, args.threads);
+			STARSCAPE_TRY(WriteFileAtomic(std::string(*args.preview), EncodeRadiance(image)));
+		}
+		return {};
+	};
+	options.onPass = [&](Cooked const& cooked, int pass, int passes) -> Expected<void>
+	{
+		STARSCAPE_TRY(writeSky(cooked));
+		Log(std::format("pass {}/{} written", pass, passes));
+		return {};
+	};
 	Expected<Cooked> const result = starscape::Cook(*scene, options);
 	if (!result)
 	{
 		return Report(result.error());
 	}
 	Cooked const& cooked = *result;
-	std::vector<uint8_t> const bytes = BuildFile(cooked, scene->hash);
-	if (Expected<void> const written = WriteFileAtomic(std::string(*args.output), bytes); !written)
-	{
-		return Report(written.error());
-	}
+	MarchParams const params = ParamsFor(options.quality.value_or(scene->output.quality));
+	int const scenePasses = params.samplesPerAxis * params.samplesPerAxis;
 
 	double const total = cooked.stats.pointFlux + cooked.stats.diffuseFlux;
-	Log(std::format("wrote {} ({} bytes)", *args.output, bytes.size()));
+	Log(std::format("wrote {} ({} of {} passes)", *args.output, cooked.passes, scenePasses));
 	Log(std::format("threshold F_res = {:.4g} (magnitude {:.2f}); {} stars; points carry {:.2f}% of the light",
 		cooked.fluxThreshold, -2.5 * std::log10(cooked.fluxThreshold), cooked.stats.starCount,
 		total > 0.0 ? 100.0 * cooked.stats.pointFlux / total : 0.0));
@@ -230,14 +247,13 @@ int Cook(Arguments const& args)
 		Log(std::format("warning: {} drawn stars found nothing resolved on re-march and were dropped", cooked.stats.droppedStars));
 	}
 
-	if (args.preview)
+	if (args.preview && scene->output.previewMarch)
 	{
+		std::vector<uint8_t> const bytes = BuildFile(cooked, scene->hash);
 		kre_starscape::View view;
 		kre_starscape::Parse(bytes, view);
-		Image const image = scene->output.previewMarch
-			? RenderMarchedPreview(PrepareScene(*scene), ParamsFor(options.quality.value_or(scene->output.quality)), view,
-				scene->output.previewWidth, 0.0, args.threads)
-			: RenderPreview(view, scene->output.previewWidth, 0.0, args.threads);
+		Image const image = RenderMarchedPreview(PrepareScene(*scene), params, view,
+			scene->output.previewWidth, 0.0, args.threads);
 		if (Expected<void> const written = WriteFileAtomic(std::string(*args.preview), EncodeRadiance(image)); !written)
 		{
 			return Report(written.error());
