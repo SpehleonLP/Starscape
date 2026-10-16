@@ -52,17 +52,18 @@ endif()
 
 set(SHADER_OUT ${CMAKE_CURRENT_BINARY_DIR}/shaders)
 file(MAKE_DIRECTORY ${SHADER_OUT})
+# The embedded SPIR-V lands in <name>.spv.h: a plain <name>.h would shadow or be shadowed by src/<name>.h.
 function(starscape_shader name)
 	set(source ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${name}.comp)
 	file(GLOB field_headers ${CMAKE_CURRENT_SOURCE_DIR}/src/field/*.glsl.h ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.glsl)
-	add_custom_command(OUTPUT ${SHADER_OUT}/${name}.h
+	add_custom_command(OUTPUT ${SHADER_OUT}/${name}.spv.h
 		COMMAND ${GLSLANG_VALIDATOR} -V --target-env vulkan1.2 -I${CMAKE_CURRENT_SOURCE_DIR}/src -I${CMAKE_CURRENT_SOURCE_DIR}/shaders
 			-o ${SHADER_OUT}/${name}.spv ${source}
-		COMMAND ${CMAKE_COMMAND} -DIN=${SHADER_OUT}/${name}.spv -DOUT=${SHADER_OUT}/${name}.h -DNAME=k_${name}_spirv
+		COMMAND ${CMAKE_COMMAND} -DIN=${SHADER_OUT}/${name}.spv -DOUT=${SHADER_OUT}/${name}.spv.h -DNAME=k_${name}_spirv
 			-P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedSpirv.cmake
 		DEPENDS ${source} ${field_headers} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedSpirv.cmake
 		VERBATIM)
-	set_property(GLOBAL APPEND PROPERTY STARSCAPE_SHADER_HEADERS ${SHADER_OUT}/${name}.h)
+	set_property(GLOBAL APPEND PROPERTY STARSCAPE_SHADER_HEADERS ${SHADER_OUT}/${name}.spv.h)
 endfunction()
 
 if(STARSCAPE_GPU)
@@ -70,15 +71,19 @@ if(STARSCAPE_GPU)
 	target_include_directories(starscape-volk SYSTEM PUBLIC third_party/volk third_party/vulkan)
 	target_compile_definitions(starscape-volk PUBLIC VK_NO_PROTOTYPES)
 	target_link_libraries(starscape-volk PUBLIC ${CMAKE_DL_LIBS})
-	target_sources(starscape-core PRIVATE src/gpu/device.cpp)
+	target_sources(starscape-core PRIVATE src/gpu/device.cpp src/gpu/pack.cpp src/gpu/probe.cpp)
 	# Vulkan create-info structs are written with designated initializers that name only the fields in use;
 	# the omitted ones are meant to be zero, which is what this warning objects to.
 	if(NOT MSVC)
-		set_source_files_properties(src/gpu/device.cpp PROPERTIES COMPILE_OPTIONS -Wno-missing-field-initializers)
+		set_source_files_properties(src/gpu/device.cpp src/gpu/probe.cpp PROPERTIES COMPILE_OPTIONS -Wno-missing-field-initializers)
 	endif()
 	target_compile_definitions(starscape-core PUBLIC STARSCAPE_GPU=1)
 	target_link_libraries(starscape-core PUBLIC starscape-volk)
 	target_include_directories(starscape-core PUBLIC ${SHADER_OUT})
+	starscape_shader(probe)
+	get_property(shader_headers GLOBAL PROPERTY STARSCAPE_SHADER_HEADERS)
+	add_custom_target(starscape-shaders DEPENDS ${shader_headers})
+	add_dependencies(starscape-core starscape-shaders)
 endif()
 
 enable_testing()
@@ -100,8 +105,9 @@ target_link_libraries(starscape-tests PRIVATE starscape-core)
 add_test(NAME unit COMMAND starscape-tests)
 
 if(STARSCAPE_GPU)
-	add_executable(starscape-gpu-tests tests/gpu/main.cpp tests/gpu/test_device.cpp)
+	add_executable(starscape-gpu-tests tests/gpu/main.cpp tests/gpu/test_device.cpp tests/gpu/test_probe.cpp)
 	target_link_libraries(starscape-gpu-tests PRIVATE starscape-core)
+	target_compile_definitions(starscape-gpu-tests PRIVATE STARSCAPE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 	add_test(NAME gpu COMMAND starscape-gpu-tests)
 	set_tests_properties(gpu PROPERTIES SKIP_RETURN_CODE 77)
 endif()

@@ -68,18 +68,9 @@ FIELD_INLINE real Corner(int64_t ix, int64_t iy, int64_t iz, real fx, real fy, r
 // structured place in it. An irrational shift per octave moves every octave off the lattice.
 FIELD_CONST real3 kOctaveShift = real3(0.5497004779, 0.6710436067, 0.8191725134);
 
-// Perlin gradient noise: roughly in [-1, 1], exactly zero on integer lattice points.
-FIELD_INLINE real GradientNoise(real3 p, uint64_t seed)
+// Perlin gradient noise in lattice cell (ix, iy, iz) at fraction (fx, fy, fz) within it.
+FIELD_INLINE real GradientNoiseInCell(int64_t ix, int64_t iy, int64_t iz, real fx, real fy, real fz, uint64_t seed)
 {
-	const real x0 = floor(p.x);
-	const real y0 = floor(p.y);
-	const real z0 = floor(p.z);
-	const int64_t ix = int64_t(x0);
-	const int64_t iy = int64_t(y0);
-	const int64_t iz = int64_t(z0);
-	const real fx = p.x - x0;
-	const real fy = p.y - y0;
-	const real fz = p.z - z0;
 	const real u = Fade(fx);
 	const real v = Fade(fy);
 	const real w = Fade(fz);
@@ -97,39 +88,120 @@ FIELD_INLINE real GradientNoise(real3 p, uint64_t seed)
 		w);
 }
 
-// `octaves` octaves at doubling frequency and halving amplitude, divided by the amplitude sum.
-FIELD_INLINE real Fbm(real3 p, int octaves, uint64_t seed)
+// Perlin gradient noise: roughly in [-1, 1], exactly zero on integer lattice points.
+FIELD_INLINE real GradientNoise(real3 p, uint64_t seed)
+{
+	const real x0 = floor(p.x);
+	const real y0 = floor(p.y);
+	const real z0 = floor(p.z);
+	return GradientNoiseInCell(int64_t(x0), int64_t(y0), int64_t(z0), p.x - x0, p.y - y0, p.z - z0, seed);
+}
+
+// An octave sum's position in lattice space. The octave loop below is shared; how the position is held is not.
+// The CPU keeps today's double arithmetic, so the reference does not move. A float holding the top octave's
+// lattice coordinate (thousands of cells out) resolves only ~1e-3 of a cell there, and the dust's log-normal
+// multiplies that error by σ / kRidgedSigma ≈ 26. So the GPU holds the integer cell exactly in 64 bits and
+// only the fraction in float: each doubling moves the whole part of 2f + shift into the cell, so the hash sees
+// the cell the CPU's floor() gives and the fraction keeps float's full precision near [0, 1).
+#ifdef __cplusplus
+
+struct NoisePoint
+{
+	real3 p;
+};
+
+FIELD_INLINE NoisePoint NoiseStart(real3 p, real wavelength)
+{
+	return NoisePoint{p / wavelength + kOctaveShift};
+}
+
+FIELD_INLINE real NoiseAt(IN(NoisePoint) n, uint64_t seed)
+{
+	return GradientNoise(n.p, seed);
+}
+
+FIELD_INLINE NoisePoint NoiseDoubled(IN(NoisePoint) n)
+{
+	return NoisePoint{n.p * 2.0 + kOctaveShift};
+}
+
+#else
+
+struct NoisePoint
+{
+	i64vec3 cell;
+	vec3    f;
+};
+
+NoisePoint NoiseStart(vec3 p, float wavelength)
+{
+	// Splitting off whole wavelengths before dividing keeps the remainder's error at float's resolution of
+	// one wavelength, wherever p is: c·λ is an integer below 2^24, so p − c·λ rounds at most once.
+	const vec3 c = floor(p / wavelength);
+	const vec3 f = (p - c * wavelength) / wavelength + kOctaveShift;
+	const vec3 whole = floor(f);
+	return NoisePoint(i64vec3(c) + i64vec3(whole), f - whole);
+}
+
+float NoiseAt(NoisePoint n, uint64_t seed)
+{
+	return GradientNoiseInCell(n.cell.x, n.cell.y, n.cell.z, n.f.x, n.f.y, n.f.z, seed);
+}
+
+NoisePoint NoiseDoubled(NoisePoint n)
+{
+	const vec3 f = n.f * 2.0 + kOctaveShift;
+	const vec3 whole = floor(f);
+	return NoisePoint(n.cell * 2l + i64vec3(whole), f - whole);
+}
+
+#endif
+
+// `octaves` octaves of the noise whose lattice cells are `wavelength` across, at doubling frequency and
+// halving amplitude, divided by the amplitude sum.
+FIELD_INLINE real FbmAt(real3 p, real wavelength, int octaves, uint64_t seed)
 {
 	real sum = 0.0;
 	real amplitude = 1.0;
 	real norm = 0.0;
-	p += kOctaveShift;
+	NoisePoint n = NoiseStart(p, wavelength);
 	for (int octave = 0; octave < octaves; ++octave)
 	{
-		sum += amplitude * GradientNoise(p, seed + uint64_t(octave) * 0x632BE59BD9B4E019ul);
+		sum += amplitude * NoiseAt(n, seed + uint64_t(octave) * 0x632BE59BD9B4E019ul);
 		norm += amplitude;
 		amplitude *= 0.5;
-		p = p * 2.0 + kOctaveShift;
+		n = NoiseDoubled(n);
 	}
 	return sum / norm;
 }
 
 // Squared, so the ridges where the noise crosses zero are thin and the dust they carry is filaments.
-FIELD_INLINE real RidgedFbm(real3 p, int octaves, uint64_t seed)
+FIELD_INLINE real RidgedFbmAt(real3 p, real wavelength, int octaves, uint64_t seed)
 {
 	real sum = 0.0;
 	real amplitude = 1.0;
 	real norm = 0.0;
-	p += kOctaveShift;
+	NoisePoint n = NoiseStart(p, wavelength);
 	for (int octave = 0; octave < octaves; ++octave)
 	{
-		const real n = GradientNoise(p, seed + uint64_t(octave) * 0x632BE59BD9B4E019ul);
-		sum += amplitude * ((1.0 - abs(n)) * (1.0 - abs(n)));
+		const real v = NoiseAt(n, seed + uint64_t(octave) * 0x632BE59BD9B4E019ul);
+		sum += amplitude * ((1.0 - abs(v)) * (1.0 - abs(v)));
 		norm += amplitude;
 		amplitude *= 0.5;
-		p = p * 2.0 + kOctaveShift;
+		n = NoiseDoubled(n);
 	}
 	return sum / norm;
+}
+
+// The same sums with p already in lattice units (wavelength 1: p / 1 is p exactly, in both languages).
+FIELD_INLINE real Fbm(real3 p, int octaves, uint64_t seed)
+{
+	return FbmAt(p, 1.0, octaves, seed);
+}
+
+FIELD_INLINE real RidgedFbm(real3 p, int octaves, uint64_t seed)
+{
+	return RidgedFbmAt(p, 1.0, octaves, seed);
 }
 
 #ifdef __cplusplus

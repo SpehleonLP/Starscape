@@ -401,4 +401,93 @@ Expected<VkPipeline> Device::CreateComputePipeline(std::span<uint32_t const> spi
 	return pipeline;
 }
 
+void Device::DestroyPipeline(VkPipeline& pipeline)
+{
+	if (pipeline != VK_NULL_HANDLE)
+	{
+		vkDestroyPipeline(m_device, pipeline, nullptr);
+		pipeline = VK_NULL_HANDLE;
+	}
+}
+
+Expected<VkDescriptorSetLayout> Device::CreateDescriptorSetLayout(uint32_t bindings)
+{
+	std::vector<VkDescriptorSetLayoutBinding> entries(bindings);
+	for (uint32_t i = 0; i < bindings; ++i)
+	{
+		entries[i] = {.binding = i, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT};
+	}
+	VkDescriptorSetLayoutCreateInfo const info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = bindings, .pBindings = entries.data()};
+	VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+	STARSCAPE_TRY(Check(vkCreateDescriptorSetLayout(m_device, &info, nullptr, &layout), "vkCreateDescriptorSetLayout"));
+	return layout;
+}
+
+void Device::DestroyDescriptorSetLayout(VkDescriptorSetLayout& layout)
+{
+	if (layout != VK_NULL_HANDLE)
+	{
+		vkDestroyDescriptorSetLayout(m_device, layout, nullptr);
+		layout = VK_NULL_HANDLE;
+	}
+}
+
+Expected<VkPipelineLayout> Device::CreatePipelineLayout(VkDescriptorSetLayout setLayout, uint32_t pushBytes)
+{
+	VkPushConstantRange const range{.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .offset = 0, .size = pushBytes};
+	VkPipelineLayoutCreateInfo const info{.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1, .pSetLayouts = &setLayout,
+		.pushConstantRangeCount = pushBytes > 0 ? 1u : 0u, .pPushConstantRanges = pushBytes > 0 ? &range : nullptr};
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	STARSCAPE_TRY(Check(vkCreatePipelineLayout(m_device, &info, nullptr, &layout), "vkCreatePipelineLayout"));
+	return layout;
+}
+
+void Device::DestroyPipelineLayout(VkPipelineLayout& layout)
+{
+	if (layout != VK_NULL_HANDLE)
+	{
+		vkDestroyPipelineLayout(m_device, layout, nullptr);
+		layout = VK_NULL_HANDLE;
+	}
+}
+
+Expected<VkDescriptorPool> Device::CreateDescriptorPool(uint32_t sets, uint32_t storageBuffers)
+{
+	VkDescriptorPoolSize const size{.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = storageBuffers};
+	VkDescriptorPoolCreateInfo const info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = sets, .poolSizeCount = 1, .pPoolSizes = &size};
+	VkDescriptorPool pool = VK_NULL_HANDLE;
+	STARSCAPE_TRY(Check(vkCreateDescriptorPool(m_device, &info, nullptr, &pool), "vkCreateDescriptorPool"));
+	return pool;
+}
+
+void Device::DestroyDescriptorPool(VkDescriptorPool& pool)
+{
+	if (pool != VK_NULL_HANDLE)
+	{
+		vkDestroyDescriptorPool(m_device, pool, nullptr);
+		pool = VK_NULL_HANDLE;
+	}
+}
+
+Expected<VkDescriptorSet> Device::AllocateDescriptorSet(VkDescriptorPool pool, VkDescriptorSetLayout layout)
+{
+	VkDescriptorSetAllocateInfo const info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = pool, .descriptorSetCount = 1, .pSetLayouts = &layout};
+	VkDescriptorSet set = VK_NULL_HANDLE;
+	STARSCAPE_TRY(Check(vkAllocateDescriptorSets(m_device, &info, &set), "vkAllocateDescriptorSets"));
+	return set;
+}
+
+void Device::WriteStorageBuffers(VkDescriptorSet set, std::span<Buffer const> buffers)
+{
+	std::vector<VkDescriptorBufferInfo> infos(buffers.size());
+	std::vector<VkWriteDescriptorSet> writes(buffers.size());
+	for (size_t i = 0; i < buffers.size(); ++i)
+	{
+		infos[i] = {.buffer = buffers[i].buffer, .offset = 0, .range = VK_WHOLE_SIZE};
+		writes[i] = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = uint32_t(i), .descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &infos[i]};
+	}
+	vkUpdateDescriptorSets(m_device, uint32_t(writes.size()), writes.data(), 0, nullptr);
+}
+
 }

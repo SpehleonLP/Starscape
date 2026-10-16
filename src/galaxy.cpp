@@ -33,7 +33,7 @@ double DustFieldMean(Dust const& dust, uint64_t seed)
 	{
 		return 1.0;
 	}
-	return SpatialMean([&](glm::dvec3 p) { return DustField(dust, p, seed); });
+	return SpatialMean([&](glm::dvec3 p) { return DustField(dust, p, 1.0, seed); });
 }
 
 double AssociationMean(Disk const& disk, uint64_t seed)
@@ -42,7 +42,7 @@ double AssociationMean(Disk const& disk, uint64_t seed)
 	{
 		return 1.0;
 	}
-	return SpatialMean([&](glm::dvec3 p) { return AssociationField(disk, p, seed); });
+	return SpatialMean([&](glm::dvec3 p) { return AssociationField(disk, p, 1.0, seed); });
 }
 
 // Needs the dust's filamentMean already measured.
@@ -122,7 +122,7 @@ double LargeGasMean(Gas const& gas, uint64_t seed)
 	{
 		return 1.0;
 	}
-	return SpatialMean([&](glm::dvec3 q) { return LargeGasField(q, seed); });
+	return SpatialMean([&](glm::dvec3 q) { return LargeGasField(q, 1.0, seed); });
 }
 
 PreparedGalaxy PrepareGalaxy(Galaxy const& galaxy)

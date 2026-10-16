@@ -59,6 +59,19 @@ public:
 	Expected<double> Submit(std::function<void(VkCommandBuffer)> const& record);
 	// Entry point "main"; the shader module is not kept.
 	Expected<VkPipeline> CreateComputePipeline(std::span<uint32_t const> spirv, VkPipelineLayout layout);
+	void DestroyPipeline(VkPipeline& pipeline);
+
+	// Compute-stage descriptors: one set of `bindings` storage buffers at bindings 0..bindings-1, and
+	// `pushBytes` of push constants (0: none). Each Create has its Destroy; destroying a pool frees its sets.
+	Expected<VkDescriptorSetLayout> CreateDescriptorSetLayout(uint32_t bindings);
+	void DestroyDescriptorSetLayout(VkDescriptorSetLayout& layout);
+	Expected<VkPipelineLayout> CreatePipelineLayout(VkDescriptorSetLayout setLayout, uint32_t pushBytes);
+	void DestroyPipelineLayout(VkPipelineLayout& layout);
+	Expected<VkDescriptorPool> CreateDescriptorPool(uint32_t sets, uint32_t storageBuffers);
+	void DestroyDescriptorPool(VkDescriptorPool& pool);
+	Expected<VkDescriptorSet> AllocateDescriptorSet(VkDescriptorPool pool, VkDescriptorSetLayout layout);
+	// Binds buffers[i] whole to binding i.
+	void WriteStorageBuffers(VkDescriptorSet set, std::span<Buffer const> buffers);
 
 private:
 	Device() = default;

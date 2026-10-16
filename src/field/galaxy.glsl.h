@@ -180,16 +180,16 @@ FIELD_INLINE real Radians(real d)
 
 // Dust is filamentary, so its field rides ridged noise; that noise is bounded above, which pulls the
 // log-normal's mean below one (0.65 at σ 2). Measured here rather than tabulated, so any σ stays calibrated.
-FIELD_INLINE real DustField(IN(Dust) dust, real3 noiseSpace, uint64_t seed)
+FIELD_INLINE real DustField(IN(Dust) dust, real3 p, real wavelength, uint64_t seed)
 {
-	return LogNormal(dust.filament, (RidgedFbm(noiseSpace, kDustOctaves, seed ^ kDustNoiseSalt) - kRidgedMean) / kRidgedSigma);
+	return LogNormal(dust.filament, (RidgedFbmAt(p, wavelength, kDustOctaves, seed ^ kDustNoiseSalt) - kRidgedMean) / kRidgedSigma);
 }
 
 // Young stars are born in OB associations tens to a couple of hundred parsecs across, so the bright
 // stars, which are mostly young, gather into groups like Orion's while the old field stays smooth.
-FIELD_INLINE real AssociationField(IN(Disk) disk, real3 noiseSpace, uint64_t seed)
+FIELD_INLINE real AssociationField(IN(Disk) disk, real3 p, real wavelength, uint64_t seed)
 {
-	return LogNormal(disk.associationClumping, Fbm(noiseSpace, kAssociationOctaves, seed ^ kAssociationNoiseSalt) / kFbmSigma);
+	return LogNormal(disk.associationClumping, FbmAt(p, wavelength, kAssociationOctaves, seed ^ kAssociationNoiseSalt) / kFbmSigma);
 }
 
 FIELD_INLINE real DustWavelength(IN(Galaxy) galaxy)
@@ -201,7 +201,7 @@ FIELD_INLINE real DustWavelength(IN(Galaxy) galaxy)
 // Mean one over space: the dust's filaments with the extinction's normalisation.
 FIELD_INLINE real DustFilaments(IN(Galaxy) galaxy, real3 p)
 {
-	return DustField(galaxy.dust, p / DustWavelength(galaxy), galaxy.seed) / galaxy.dust.filamentMean;
+	return DustField(galaxy.dust, p, DustWavelength(galaxy), galaxy.seed) / galaxy.dust.filamentMean;
 }
 
 // The bubble's normalised radius: 1 on its ellipsoid. Only meaningful when it has a radius.
@@ -227,14 +227,14 @@ FIELD_INLINE real BubbleFactor(IN(Dust) dust, real3 p)
 // Mean one: the soft clumps that also pick the gas colour.
 FIELD_INLINE real GasClumps(IN(Galaxy) galaxy, real3 p)
 {
-	return LogNormal(1.2, Fbm(p / kGasClumpWavelength, kGasOctaves, galaxy.seed ^ kGasClumpSalt) / kFbmSigma);
+	return LogNormal(1.2, FbmAt(p, kGasClumpWavelength, kGasOctaves, galaxy.seed ^ kGasClumpSalt) / kFbmSigma);
 }
 
 // G before its mean is divided out: clumps plus thin bright wisps, gathered onto the dust's filaments
 // because gas and dust are one medium.
 FIELD_INLINE real GasTexture(IN(Galaxy) galaxy, real3 p, real clumps)
 {
-	const real wisps = 6.0 * pow(max(0.0, RidgedFbm(p / kGasWispWavelength, kGasOctaves, galaxy.seed ^ kGasWispSalt)), 6.0);
+	const real wisps = 6.0 * pow(max(0.0, RidgedFbmAt(p, kGasWispWavelength, kGasOctaves, galaxy.seed ^ kGasWispSalt)), 6.0);
 	const real filaments = galaxy.dust.enabled ? DustFilaments(galaxy, p) : 1.0;
 	return (0.6 * clumps + wisps) * sqrt(filaments);
 }
@@ -248,7 +248,7 @@ FIELD_INLINE real3 PaletteColour(IN(Galaxy) galaxy, IN(Gas) gas, real3 p)
 		return gas.colour;
 	}
 	const real count = real(gas.paletteCount);
-	const real z = Fbm(p / gas.paletteWavelength, 3, galaxy.seed ^ kPaletteSalt) / kFbmSigma;
+	const real z = FbmAt(p, gas.paletteWavelength, 3, galaxy.seed ^ kPaletteSalt) / kFbmSigma;
 	real u = FMod(0.9 * z, count);
 	if (u < 0.0)
 	{
@@ -261,9 +261,9 @@ FIELD_INLINE real3 PaletteColour(IN(Galaxy) galaxy, IN(Gas) gas, real3 p)
 	return mix(gas.palette[i], gas.palette[(i + 1) % gas.paletteCount], f);
 }
 
-FIELD_INLINE real LargeGasField(real3 noiseSpace, uint64_t seed)
+FIELD_INLINE real LargeGasField(real3 p, real wavelength, uint64_t seed)
 {
-	return LogNormal(1.0, Fbm(noiseSpace, kLargeGasOctaves, seed ^ kLargeGasSalt) / kFbmSigma);
+	return LogNormal(1.0, FbmAt(p, wavelength, kLargeGasOctaves, seed ^ kLargeGasSalt) / kFbmSigma);
 }
 
 FIELD_INLINE real ArmProximity(IN(Arms) arms, real radius, real azimuth, real offset)
@@ -298,13 +298,13 @@ FIELD_INLINE real3 RimGlow(IN(Galaxy) galaxy, real radius, real3 p)
 		return real3(0.0);
 	}
 	// Only patches of the wall glow: the eye finds arcs where a lit patch's edge runs along the line of sight.
-	const real mask = clamp(Fbm(p / 150.0, 3, galaxy.seed ^ kRimMaskSalt) / kFbmSigma - 0.5, 0.0, 1.0);
+	const real mask = clamp(FbmAt(p, 150.0, 3, galaxy.seed ^ kRimMaskSalt) / kFbmSigma - 0.5, 0.0, 1.0);
 	if (mask <= 0.0)
 	{
 		return real3(0.0);
 	}
 	const real shell = exp(-(offset / 0.04) * (offset / 0.04));
-	const real wisps = 0.3 + 6.0 * pow(max(0.0, RidgedFbm(p / 30.0, 5, galaxy.seed ^ kRimWispSalt)), 6.0);
+	const real wisps = 0.3 + 6.0 * pow(max(0.0, RidgedFbmAt(p, 30.0, 5, galaxy.seed ^ kRimWispSalt)), 6.0);
 	// The young density the disk would have at this radius, without arms, associations or its thickness.
 	const real reference = galaxy.disk.density * exp(-radius / galaxy.disk.scaleLength) * (galaxy.disk.youngFraction + galaxy.disk.armYoungFraction);
 	const real light = galaxy.dust.bubbleRim * galaxy.disk.gas.youngLight * reference * shell * mask * wisps;
@@ -335,7 +335,7 @@ FIELD_INLINE real AddDisk(IN(Galaxy) galaxy, IN(Disk) disk, real3 p, real radius
 	if (disk.arms.count > 0)
 	{
 		// Log-normal, so clumping opens real gaps between star clouds instead of a ripple on the crest.
-		clumps = LogNormal(disk.arms.clumping, Fbm(p / disk.arms.width, 4, galaxy.seed) / kFbmSigma);
+		clumps = LogNormal(disk.arms.clumping, FbmAt(p, disk.arms.width, 4, galaxy.seed) / kFbmSigma);
 		modulation = max(0.0, 1.0 + (disk.arms.contrast - 1.0) * crest * clumps);
 	}
 	const real midplane = disk.density * exp(-radius / disk.scaleLength) * modulation;
@@ -351,7 +351,7 @@ FIELD_INLINE real AddDisk(IN(Galaxy) galaxy, IN(Disk) disk, real3 p, real radius
 	real associations = 1.0;
 	if (disk.associationSize > 0.0)
 	{
-		associations = AssociationField(disk, p / disk.associationSize, galaxy.seed) / disk.associationMean;
+		associations = AssociationField(disk, p, disk.associationSize, galaxy.seed) / disk.associationMean;
 	}
 	const real youngDensity = midplane * young * associations * Sech2(p.z / (2.0 * youngHeight));
 	Push(result, youngDensity, disk.armPopulation);
@@ -371,7 +371,7 @@ FIELD_INLINE real AddDisk(IN(Galaxy) galaxy, IN(Disk) disk, real3 p, real radius
 		}
 		if (disk.gas.largeGlow > 0.0)
 		{
-			const real field = LargeGasField(p / disk.gas.largeWavelength, galaxy.seed) / disk.gas.largeMean;
+			const real field = LargeGasField(p, disk.gas.largeWavelength, galaxy.seed) / disk.gas.largeMean;
 			const real light = disk.gas.largeGlow * disk.gas.youngLight * youngDensity * field * bubble;
 			result.gas += (light * 100.0 * kFluxAt10pc) * base;
 		}
