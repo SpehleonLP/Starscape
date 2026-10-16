@@ -13,7 +13,6 @@ find_package(Threads REQUIRED)
 
 # Every source except the CLI entry point; the tests link the same library.
 set(STARSCAPE_SOURCES
-	src/noise.cpp
 	src/population.cpp
 	src/galaxy.cpp
 	src/presets.cpp

@@ -17,8 +17,7 @@ constexpr double kPi = 3.14159265358979323846;
 // Salts so the dust filaments do not trace the same noise as the arm clumps.
 constexpr uint64_t kDustNoiseSalt = 0xD057D057D057D057ull;
 
-// Moments measured over 4·10⁵ random points. Fbm: σ 0.167 at 4 octaves, 0.159 at 6. Ridged fbm at 6 octaves.
-constexpr double kFbmSigma = 0.163;
+// Moments measured over 4·10⁵ random points. Ridged fbm at 6 octaves (Fbm's σ is kFbmSigma).
 constexpr double kRidgedMean = 0.6307;
 constexpr double kRidgedSigma = 0.1339;
 constexpr int kDustOctaves = 6;
@@ -38,15 +37,6 @@ constexpr int kLargeGasOctaves = 4;
 // The rim's patches and wisps. Fixed rather than scene keys: the owner-approved nebula look was tuned on them.
 constexpr uint64_t kRimMaskSalt = 0x81B1ull;
 constexpr uint64_t kRimWispSalt = 0x81B0ull;
-
-// A log-normal field whose logarithm has standard deviation `sigma`, given z of unit variance. Holding
-// the mean near one lets structure move stars and dust around without changing how much there is,
-// so star counts and the dust's magnitudes-per-kiloparsec calibration survive any setting. For fbm the
-// mean stays within 2% of one up to σ 1.5.
-double LogNormal(double sigma, double z)
-{
-	return std::exp(sigma * z - 0.5 * sigma * sigma);
-}
 
 // Dust is filamentary, so its field rides ridged noise; that noise is bounded above, which pulls the
 // log-normal's mean below one (0.65 at σ 2). Measured here rather than tabulated, so any σ stays calibrated.
@@ -210,13 +200,6 @@ glm::dmat3 RotationZ(double angle)
 	return glm::dmat3(c, s, 0.0, -s, c, 0.0, 0.0, 0.0, 1.0);
 }
 
-}
-
-// 4e^{-2|x|} / (1 + e^{-2|x|})² equals 1/cosh²(x) without overflowing for large |x|.
-double Sech2(double x)
-{
-	double const e = std::exp(-2.0 * std::abs(x));
-	return 4.0 * e / ((1.0 + e) * (1.0 + e));
 }
 
 double ArmProximity(Arms const& arms, double radius, double azimuth, double offset)

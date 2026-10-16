@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <glm/vec3.hpp>
+#include "field/common.glsl.h"
 
 namespace starscape
 {
@@ -18,7 +19,6 @@ inline constexpr double kFluxAt10pc = 0.01169499;
 
 double BinLuminosity(int bin);   // geometric centre of the bin, L_V☉
 double BinEdge(int edge);        // edge in [0, kBins]
-double Luminance(glm::dvec3 rgb);   // Rec.709 Y; for a star's flux this is the V-band proxy
 
 struct Population
 {

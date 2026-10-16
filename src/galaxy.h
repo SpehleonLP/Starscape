@@ -4,6 +4,7 @@
 #include <string>
 #include <glm/mat3x3.hpp>
 #include <glm/vec3.hpp>
+#include "field/common.glsl.h"
 
 namespace starscape
 {
@@ -147,7 +148,6 @@ struct PreparedGalaxy
 	double     boundRadius = 0.0;
 };
 
-double Sech2(double x);
 double ArmProximity(Arms const& arms, double radius, double azimuth, double offset);
 double BoundRadius(Galaxy const& galaxy);
 PreparedGalaxy PrepareGalaxy(Galaxy const& galaxy);

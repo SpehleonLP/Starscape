@@ -16,11 +16,6 @@ double BinEdge(int edge)
 	return std::pow(10.0, kLogLuminosityMin + kLogLuminositySpan * edge / kBins);
 }
 
-double Luminance(glm::dvec3 rgb)
-{
-	return 0.2126 * rgb.x + 0.7152 * rgb.y + 0.0722 * rgb.z;
-}
-
 namespace
 {
 
