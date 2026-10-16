@@ -49,7 +49,8 @@ include `include/kre_starscape.h` and read the file themselves.
 - Block compression of the diffuse layer (BC6H). The format reserves an encoding
   value for it.
 - Placed or near nebulae: a 40° nebula looked right in a still frame but dominated the
-  sky in a 3D viewer. Runtime grain, animated or time-varying skies.
+  sky in a 3D viewer. The bubble rim is near gas admitted as part of the medium, checked by the
+  owner in a 3D viewer on 2026-10-15. Runtime grain, animated or time-varying skies.
 - A GPU implementation. The CPU cook is the reference.
 
 ## 1. Galaxy model
@@ -220,6 +221,109 @@ The gas is diffuse light only:
 - `valueScale` already adapts to the brightest stored value.
 
 Thick disks and other components without an arm population carry no gas.
+
+Four more light terms extend the gas: a palette, large-scale gas, a bubble rim and
+dust reflection. All are driven by fields the galaxy already has (young stars,
+dust, the bubble), so none places an object. Each enters the march exactly like
+the gas, added to `GalaxySample::gas`, in the units of a star bin's j_i; none
+touches the flux histogram, the threshold F_res, the point budgets or the star
+draws. Each is exactly zero at its default, and an empty palette takes the plain
+`colour` path, so scenes that set none of them cook as before.
+
+#### Palette
+
+A palette replaces the gas's single `colour` with a cyclic ramp chosen by a
+large-scale field:
+
+    P(x) = ramp(z(x)),   z = fbm(x / λ_p, 3 octaves) / σ_fbm
+
+- **ramp** walks the palette's N entries cyclically. The index is
+  u = (0.9 · z) mod N, with mod giving a result in [0, N). Between entry ⌊u⌋ and
+  the next (the last wraps to the first), the weight is the smoothstep of u's
+  fractional part. The 0.9 means a one-σ change in the field moves about one
+  palette entry. The entry two steps from the field's mean is reached only in the
+  tails (|z| > 1.1), so with four entries each is the nearest colour for a few
+  percent of points at least, not a quarter.
+- Every entry is normalised to Rec.709 Y = 1 when the galaxy is prepared, so a
+  blend of two entries also has Y = 1: colour never changes the amount of light.
+- λ_p is `palette_wavelength`. The noise uses `galaxy.seed` with its own salt.
+- Without a palette, P(x) is the gas's `colour`, so the terms that use P need no
+  special case. With one, P replaces `colour` everywhere the gas used it: the
+  gas's colour c becomes mix(P, ĉ_core, smoothstep(1, 3, D)).
+
+Fixed salts, shared by the noise fields of these terms:
+
+| Field | Salt |
+|---|---|
+| Palette hue | `0x9A1E77E` |
+| Rim patches (M) | `0x81B1` |
+| Rim wisps (W) | `0x81B0` |
+| Large-scale gas | `0xB16B16` |
+
+The salts and the wavelengths in the formulas below are constants, not scene
+keys: the owner-approved nebula look was tuned on them
+(`docs/images/2026-10-15-nebula-target.png`, a quick cook at face 256).
+
+#### Large-scale gas
+
+A second gas band, at the size of giant cloud complexes rather than single
+nebulae:
+
+    j_large(x) = large_glow · L̄ · n_young(x) · LN(1.0, fbm(x / λ_l, 4) / σ_fbm) / ⟨LN⟩ · B(x) · P(x)
+
+- λ_l is `large_wavelength`.
+- B is the bubble's cavity factor, as for the gas.
+- ⟨LN⟩ is the field's spatial mean, measured in `PrepareGalaxy` with the
+  `SpatialMean` walk and only when `large_glow` > 0. The walk covers the field in
+  noise space, not in parsecs, so the mean holds at any wavelength: a box in
+  parsecs would span a single noise cell at the largest wavelengths. So
+  `large_glow`, like `glow`, is this term's light as a multiple of the young
+  stars' own.
+
+#### Bubble rim
+
+Gas lit on the bubble's wall: a shell just inside the dust's ramp, so most of it
+sits in front of the wall's dust.
+
+    j_rim(x) = rim · L̄ · n_ref(x) · S(q) · M(x) · W(x) · P(4x)
+
+- **q** is the bubble's normalised radius:
+  q = sqrt((d_x² + d_y²) / r² + d_z² / h²), where d = x − bubble centre and r, h
+  are the bubble's semi-axes. The dust's cavity uses the same q, with its ramp
+  from 0.7 to 1.
+- **S(q) = exp(−((q − 0.85) / 0.04)²)** for |q − 0.85| ≤ 0.2, and exactly 0
+  outside that range, so the term costs nothing away from the wall.
+- **M(x) = clamp(fbm(x / 150 pc, 3) / σ_fbm − 0.5, 0, 1)** lights only patches of
+  the wall. The eye finds arcs where a patch's edge runs along the line of sight.
+- **W(x) = 0.3 + 6 · max(0, ridged(x / 30 pc, 5))⁶** breaks the patches into
+  wisps. Its light swings by an order of magnitude over about the shell's own
+  width, so a single line through the wall can peak off the shell; the profile
+  averaged over the wall peaks at q = 0.85.
+- **n_ref(x) = n_0 · exp(−R / R_d) · (young_fraction + arm_young_fraction)** is
+  the young density the disk would have at that galactocentric radius R, without
+  arms, associations or the sech². The rim is not confined to the young disk's
+  thickness: the bubble opens into chimneys, so the wall wraps the whole sky.
+- **P(4x)** samples the palette at four times its frequency, which gives the rim
+  its own, finer colour changes. Without a palette it is the gas `colour`.
+
+The term needs a bubble, enabled dust and an enabled thin disk with
+`arm_population` (for L̄). M and W use `galaxy.seed` with their own salts.
+
+#### Reflection
+
+Dust lit by nearby young stars scatters their light, bluish:
+
+    j_refl(x) = reflection · (α_V(x) · 1000 pc) · L̄ · n_young(x) · ĉ_refl
+
+- α_V(x) is the dust's local extinction rate in magnitudes per parsec, bubble
+  factor included. α_V · 1000 pc is that rate in magnitudes per kiloparsec, so
+  `reflection` is the scattered light as a multiple of the young stars' own
+  wherever the dust runs at 1 mag/kpc.
+- n_young is the thin disk's young density at x, so dust far from young stars
+  stays dark.
+- ĉ_refl is `reflection_colour`, normalised to Y = 1.
+- The term is added light, not light taken from the stars: scattering does not
+  conserve energy here, a stylisation.
 
 ### Stellar populations
 
@@ -474,11 +578,18 @@ seed     = 1
   glow        = 0.0                   # off in every preset
   colour      = [1.0, 0.18, 0.32]     # hydrogen red; normalised to Y = 1
   core_colour = [0.25, 1.0, 0.85]     # the densest clumps; normalised to Y = 1
+  palette            = []             # list of RGB; empty: `colour` alone
+  palette_wavelength = 1500.0         # parsecs
+  large_glow         = 0.0            # off in every preset
+  large_wavelength   = 100.0          # parsecs
 
   [galaxy.dust]
   scale_height = 100.0
   lane_offset  = 0.15
   filament     = 3.0
+  reflection        = 0.0             # off in every preset
+  reflection_colour = [0.45, 0.62, 1.0]
+  bubble            = { center = [8200.0, 0.0, 20.0], radius = 300.0, height = 800.0, rim = 0.0 }
 
 [[galaxy]]
 preset   = "small-spiral"
@@ -501,13 +612,24 @@ position = [780000.0, 120000.0, -40000.0]
   light gas, so a `gas` table there is an unknown key. `glow` is in [0, 1000]; colours need
   components ≥ 0 and Y > 0; `glow` > 0 without `arm_population` is an error. `glow` = 0 makes
   the term exactly zero, so the realistic presets are unchanged.
+- `palette` has 0 entries, or 2 to 8, written as an ordinary TOML array of arrays. Each entry
+  follows the colour rules (components ≥ 0, Y > 0). `palette_wavelength` and `large_wavelength`
+  are in [10, 100 000] pc. `large_glow`, `reflection` and `rim` are in [0, 1000]. `large_glow` > 0,
+  `rim` > 0 or `reflection` > 0 without an `arm_population` on the thin disk is an error naming the
+  key, as `glow` is: all three need the thin disk's young density. `rim` lives in the bubble's
+  inline table because it is meaningless without one. At every default the terms are exactly zero,
+  so scenes that set none of the keys cook byte for byte as they did without them.
 - `[style]` holds scene-wide stylisation. `star_saturation` (in [0, 4], default 1) applies in
   `Tabulate` to every bin's chromaticity: ĉ' = max(0, 1 + s · (ĉ − 1)), renormalised to Y = 1.
   Each bin keeps its luminance and the resolution split reads only luminance and T_V, so star
   counts, F_res and the point budgets do not move. Luminance is exactly kept only behind grey
   transmittance: dust dims blue more than red, so a bluer star loses a little more behind dust.
   `scenes/stylized-milky-way.toml` sets it to 1.5 with gas glow 1.5, dust contrast 6, filament
-  3.5 and arm contrast 2.25; its owner-approved look is `docs/images/2026-10-13-stylized-target.png`.
+  3.5 and arm contrast 2.25, and the nebula layer: a four-colour gas `palette` (red, teal, gold,
+  violet) at `palette_wavelength` 1500, `large_glow` 1.51 (1.5 times the field's mean, 1.006899 at
+  seed 1, which the cook divides out) at `large_wavelength` 100, `reflection` 2 and a bubble `rim` of 4.
+  Its owner-approved look is `docs/images/2026-10-15-nebula-target.png`; the layer sits on the look of
+  `docs/images/2026-10-13-stylized-target.png`.
 - Population presets: `young-disk`, `old-disk`, `bulge`, `halo`; components name
   theirs with `population = "..."`.
 - Unknown keys, wrong types, out-of-range values (negative scale lengths, pitch
@@ -563,6 +685,24 @@ recorded in the test's comment.
 | Saturation default | An absent `[style]` gives `star_saturation` 1, the physical sky | a default other than 1 |
 | Saturation keeps luminance | s = 4 (so some bins clip at zero): every bin's chroma has Y = 1 to 10⁻¹²; unclipped bins sit 4× as far from white; a dust-free Milky Way ray keeps its luminance to 10⁻¹² and its point budgets exactly, while its channels spread apart | skip the renormalisation |
 | Scene keys | Range and type errors for `glow`, `colour`, `core_colour` and `star_saturation`; `glow` > 0 without `arm_population` names the key | delete any one validation |
+| Defaults are inert | The realistic scene's cook with every nebula key at its default is byte-identical to the cook before the terms existed (checked once, at landing: cook hash 32b729da for the draft cook); permanently, the Gas colour test holds the plain `colour` path. A permanent byte test would need the old code beside the new | evaluate any term at its default (e.g. `reflection` 0 still mixing `reflection_colour` into the gas) |
+| Palette luminance | Every prepared palette entry has Y = 1 to 10⁻¹²; 10⁵ random points give gas with the same luminance as the plain-`colour` gas to 10⁻¹²; with four pure, distinct entries, each is the nearest colour for at least 1% of points | drop the per-entry normalisation |
+| Palette wraps | Three pure entries: some point blends the last into the first (red and blue, no green), and every point keeps the plain gas's luminance | wrap with `% kMaxPalette` instead of `% paletteCount` |
+| Thick disk takes no palette | A thick disk alone, with a palette and `glow` on the thin disk's gas: the gas stays exactly zero | pass the thin disk's gas into the thick disk's gas block |
+| Large-scale calibration | Uniform young disk, 2 × 10⁵ random points, at 100 pc and 20 000 pc wavelengths: Σ large-scale gas luminance / Σ young-star diffuse luminance = `large_glow` within 3% | light the term by the disk's whole midplane density instead of its young density |
+| Large-scale mean | ⟨LN⟩ = 1.006899 at seed 1 (2¹⁸ points), differs at seed 2, is the same at any wavelength; doubling the prepared mean halves the gas to 10⁻¹² | replace the mean's walk with 1 (first three checks); drop the division (last) |
+| Rim placement | 2 × 10⁴ directions at q = 0.2, 0.6, 0.64, 1.06, 1.5, 3: exactly zero rim emissivity. Along 50 radial lines through lit patches (q from 0.66 to 1.04): every line's peak lies in q ∈ [0.66, 1.04], and at least 20 of the 50 peak in [0.80, 0.90] (wisps can carry a line's peak off the shell) | centre the shell at q = 1 |
+| Rim profile | Emissivity averaged over 4000 directions, q from 0.70 to 1.00: the peak lies in q ∈ [0.83, 0.87] | centre the shell at q = 1 |
+| Rim patchiness | Over 10⁵ points on the shell (q = 0.85), the fraction with no rim light is in [0.60, 0.80] (analytic: M = 0 where fbm/σ_fbm < 0.5, Φ(0.5) ≈ 0.69) | drop the − 0.5 offset in M |
+| Rim needs dust | A bubble with its dust disabled has exactly zero rim emissivity on the shell | drop the dust-enabled guard in the rim |
+| Reflection tracks dust | At fixed young density, doubling `extinction` doubles the reflection emissivity to 10⁻¹²; it equals `reflection` times the young stars' own light at 1 mag/kpc to 10⁻⁸ (the dust's own R falloff leaves a 4 × 10⁻¹⁰ gap); with dust disabled it is exactly zero | use the dust's filament field without α₀ |
+| Reflection colour | `reflection_colour` is normalised to Y = 1; reflection-only gas is proportional to it | skip its normalisation |
+| New terms leave the stars alone | The Gas test's ray with every term on (glow, two-entry palette, large-scale gas, rim and reflection around a shared bubble) vs off: radiance rises, while point budgets, resolved radiance and the flux histogram are identical | add any term to `resolvedRadiance` instead of `radiance` |
+| New terms are attenuated | Large-scale gas, rim and reflection, each behind a dust slab of optical depth τ: per-channel radiance ratio with/without the slab = exp(−k_c τ) within 0.5% | add one term without the step's transmittance |
+| Palette keys | Palette of 3 read with its wavelength; absent or `[]` is none; 1 and 9 entries, a black or negative entry, a malformed entry and a non-array each error naming the key; `palette_wavelength` out of range; a `palette` on the thick disk is an unknown key | delete the luminance check |
+| Large-scale gas keys | `large_glow` and `large_wavelength` read; defaults 0 and 100; a negative `large_glow` and an out-of-range wavelength name the key; `large_glow` > 0 without `arm_population` names it | delete the `arm_population` check |
+| Rim keys | `rim` read from the bubble table, default 0; `rim` > 1000 names `dust.bubble.rim`; `rim` > 0 without `arm_population` names the thin disk's requirement | delete the `arm_population` check |
+| Reflection keys | `reflection` and `reflection_colour` read; defaults 0; a negative `reflection` and a black colour error; `reflection` > 0 without `arm_population` names the requirement | delete the `arm_population` check |
 | Example scenes | The CLI draft-cooks both files under `scenes/` (the Earth scene already has `cli-draft`; the stylized one gets its own) | — |
 
 ## 6. Repository layout
@@ -586,7 +726,7 @@ Starscape/
     writer.h/.cpp                # mips, file assembly, atomic rename
     preview.h/.cpp               # equirect render, splats, RGBE write
   scenes/milky-way-from-earth.toml
-  scenes/stylized-milky-way.toml # the fantastical look: gas glow, bolder dust, saturated stars
+  scenes/stylized-milky-way.toml # the fantastical look: gas glow, nebula layer, bolder dust, saturated stars
   third_party/                   # vendored single headers, versions in third_party/VERSIONS
     glm/  toml.hpp  doctest.h    # the Radiance .hdr writer is ~30 lines in preview.cpp
   tests/
