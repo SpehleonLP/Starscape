@@ -16,7 +16,7 @@ ctest --test-dir Build --output-on-failure
 
 C++23 (GCC 13+) and `glslangValidator` at build time. Dependencies are vendored in `third_party/` (see
 `third_party/VERSIONS`). The sky is marched on the GPU with Vulkan compute: a cook needs a Vulkan 1.2 GPU with
-`shaderInt64` and `scalarBlockLayout`, and without one it refuses with exit 1, saying what the machine lacks. On such
+a compute queue, `shaderInt64` and `scalarBlockLayout` (a software device such as llvmpipe does not count), and without one it refuses with exit 1, saying what the machine lacks. On such
 a machine the tests that cook report skipped.
 
 ## Use

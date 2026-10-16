@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
+#include <string_view>
 #include <set>
 
 using namespace starscape;
@@ -126,4 +128,29 @@ TEST_CASE("Tiles grow toward a quarter second and shrink after a slow one")
 	CHECK(NextTileRows(8, 0.0, 512) == 16);     // too fast to time: double, never divide by zero
 	CHECK(NextTileRows(400, 0.01, 512) == 512);   // never past the face
 	CHECK(NextTileRows(1, 100.0, 512) == 1);      // never below one row
+}
+
+TEST_CASE("Without a GPU a cook refuses before the calibration starts")
+{
+	// Mutation: opening the GPU march after the calibration (cook.cpp) spends the calibration first and reddens the
+	// progress count. STARSCAPE_GPU_DISABLE makes every machine one without a GPU, so this needs no device.
+	struct DisableGpu
+	{
+		DisableGpu() { setenv("STARSCAPE_GPU_DISABLE", "1", 1); }
+		~DisableGpu() { unsetenv("STARSCAPE_GPU_DISABLE"); }
+	} const disabled;
+	Scene scene = MilkyWayScene({8200.0, 0.0, 20.0});
+	scene.output.limitingMagnitude.reset();
+	scene.output.targetStars = 300;   // a calibrated threshold, so the calibration is the next thing a cook does
+	int calibrateReports = 0;
+	CookOptions options;
+	options.progress = [&](std::string_view phase, double)
+	{
+		calibrateReports += phase == "calibrate" ? 1 : 0;
+	};
+	Expected<Cooked> const cooked = Cook(scene, options);
+	REQUIRE_FALSE(cooked.has_value());
+	CHECK(cooked.error().kind == Error::Kind::Input);
+	CHECK(cooked.error().message.find("no GPU to march on: the GPU is disabled by STARSCAPE_GPU_DISABLE") != std::string::npos);
+	CHECK(calibrateReports == 0);
 }

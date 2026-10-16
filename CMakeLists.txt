@@ -115,10 +115,12 @@ set_tests_properties(gpu PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(starscape-cook-tests tests/gpu/cook_main.cpp tests/gpu/test_march.cpp tests/gpu/test_cook.cpp)
 target_link_libraries(starscape-cook-tests PRIVATE starscape-core)
 target_include_directories(starscape-cook-tests PRIVATE tests)
-target_compile_definitions(starscape-cook-tests PRIVATE STARSCAPE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" STARSCAPE_CLI_OUT="${CLI_OUT}")
+# The determinism case runs the CLI itself, so it needs the CLI built.
+target_compile_definitions(starscape-cook-tests PRIVATE STARSCAPE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" STARSCAPE_CLI_OUT="${CLI_OUT}"
+	STARSCAPE_CLI="$<TARGET_FILE:starscape>")
+add_dependencies(starscape-cook-tests starscape)
 add_test(NAME cook COMMAND starscape-cook-tests)
-# The determinism case compares its in-process cooks with the CLI's.
-set_tests_properties(cook PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_REQUIRED cli-sky)
+set_tests_properties(cook PROPERTIES SKIP_RETURN_CODE 77)
 
 add_executable(starscape src/cli.cpp)
 target_link_libraries(starscape PRIVATE starscape-core)
@@ -132,10 +134,14 @@ function(starscape_cli_test name expect)
 	add_test(NAME ${name} COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:starscape> -DEXPECT=${expect} "-DARGS=${joined}" ${T_EXTRA} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/expect_exit.cmake)
 endfunction()
 starscape_cli_test(cli-cook 0 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.toml -o ${CLI_OUT}/tiny.kre_starscape --preview ${CLI_OUT}/tiny.hdr)
-set_tests_properties(cli-cook PROPERTIES FIXTURES_SETUP tiny-sky)
-starscape_cli_test(cli-inspect 0 ARGV_LIST inspect ${CLI_OUT}/tiny.kre_starscape)
-starscape_cli_test(cli-preview 0 ARGV_LIST preview ${CLI_OUT}/tiny.kre_starscape -o ${CLI_OUT}/again.hdr --exposure 2)
-set_tests_properties(cli-inspect cli-preview PROPERTIES FIXTURES_REQUIRED tiny-sky)
+# inspect and preview read a synthetic sky written without a GPU, so they run on any machine.
+add_executable(starscape-write-sample-sky tests/write_sample_sky.cpp)
+target_link_libraries(starscape-write-sample-sky PRIVATE starscape-core)
+add_test(NAME cli-sample-sky COMMAND starscape-write-sample-sky ${CLI_OUT}/sample.kre_starscape)
+set_tests_properties(cli-sample-sky PROPERTIES FIXTURES_SETUP sample-sky)
+starscape_cli_test(cli-inspect 0 ARGV_LIST inspect ${CLI_OUT}/sample.kre_starscape)
+starscape_cli_test(cli-preview 0 ARGV_LIST preview ${CLI_OUT}/sample.kre_starscape -o ${CLI_OUT}/again.hdr --exposure 2)
+set_tests_properties(cli-inspect cli-preview PROPERTIES FIXTURES_REQUIRED sample-sky)
 starscape_cli_test(cli-bad-scene 1 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/bad-key.toml -o ${CLI_OUT}/bad.kre_starscape EXTRA -DSTDERR_CONTAINS=qualty -DABSENT=${CLI_OUT}/bad.kre_starscape)
 starscape_cli_test(cli-missing-scene 2 ARGV_LIST cook ${CLI_OUT}/absent.toml -o ${CLI_OUT}/absent.kre_starscape)
 starscape_cli_test(cli-garbage-file 1 ARGV_LIST inspect ${CLI_OUT}/garbage.kre_starscape EXTRA -DSTDERR_CONTAINS=garbage.kre_starscape)
@@ -150,7 +156,6 @@ set_tests_properties(cli-no-gpu PROPERTIES ENVIRONMENT STARSCAPE_GPU_DISABLE=1)
 
 add_test(NAME cli-determinism COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:starscape> -DSCENE=${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.toml
 	-DOUT=${CLI_OUT} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/expect_same.cmake)
-set_tests_properties(cli-determinism PROPERTIES FIXTURES_SETUP cli-sky)
 
 # A scene that sets no nebula key and one that writes each at its default must cook to the same bytes.
 add_test(NAME cli-nebula-defaults-inert COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:starscape>

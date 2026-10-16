@@ -4,6 +4,7 @@
 #extension GL_GOOGLE_include_directive : require
 #include "field/step.glsl.h"
 #include "philox.glsl"
+#include "face.glsl"
 
 layout(local_size_x = 64) in;
 
@@ -13,7 +14,7 @@ layout(scalar, set = 0, binding = 2) writeonly buffer Out { uint outputs[]; };
 
 layout(push_constant, scalar) uniform Probe
 {
-	uint     mode;   // 0: lattice hash, 1: Philox, 2: evaluate
+	uint     mode;   // 0: lattice hash, 1: Philox, 2: evaluate, 3: jitter direction
 	uint     count;
 	uint64_t seed;
 } probe;
@@ -41,6 +42,16 @@ void main()
 		outputs[4u * i + 1u] = block.y;
 		outputs[4u * i + 2u] = block.z;
 		outputs[4u * i + 3u] = block.w;
+	}
+	else if (probe.mode == 3u)
+	{
+		// inputs: faceSize, face, x, y, stratumX, stratumY, perAxis; outputs: the direction's three floats
+		const uint base = 7u * i;
+		const vec3 dir = TexelJitterDirection(inputs[base], inputs[base + 1u], inputs[base + 2u], inputs[base + 3u], inputs[base + 4u],
+			inputs[base + 5u], inputs[base + 6u], uvec2(uint(probe.seed), uint(probe.seed >> 32)));
+		outputs[3u * i] = floatBitsToUint(dir.x);
+		outputs[3u * i + 1u] = floatBitsToUint(dir.y);
+		outputs[3u * i + 2u] = floatBitsToUint(dir.z);
 	}
 	else
 	{

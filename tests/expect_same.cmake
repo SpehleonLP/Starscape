@@ -1,7 +1,8 @@
 # Cooks SCENE in two separate runs, with --threads 1 and --threads 8, and requires byte-identical sky and preview
 # files: the GPU march must not vary between runs, and the threaded calibration and star draws must not vary with the
-# thread count. The cook test then holds its in-process cooks to det1.kre_starscape.
+# thread count. Earlier outputs are removed first, so a failed cook can never pass on stale files.
 foreach(threads 1 8)
+	file(REMOVE "${OUT}/det${threads}.kre_starscape" "${OUT}/det${threads}.hdr")
 	execute_process(COMMAND "${EXE}" cook "${SCENE}" -o "${OUT}/det${threads}.kre_starscape"
 		--preview "${OUT}/det${threads}.hdr" --threads ${threads} RESULT_VARIABLE code OUTPUT_QUIET ERROR_VARIABLE errors)
 	if(NOT code EQUAL 0)

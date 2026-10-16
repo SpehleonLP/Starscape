@@ -56,15 +56,8 @@ void main()
 	{
 		return;
 	}
-	const uint texel = (pass.face * pass.faceSize + y) * pass.faceSize + x;
-	const uint stratum = pass.stratumY * pass.perAxis + pass.stratumX;
-	// RandomStream(seed, Jitter, texel, 0, 0, stratum): purpose Jitter = 1 in the top byte of word 2.
-	const uvec4 block = Philox4x32_10(uvec4(texel, 0u, 1u << 24, stratum), uvec2(pass.seedLo, pass.seedHi));
-	const float u = WordsToUnit(block.x, block.y);
-	const float v = WordsToUnit(block.z, block.w);
-	const float s = (float(x) + (float(pass.stratumX) + u) / float(pass.perAxis)) / float(pass.faceSize);
-	const float t = (float(y) + (float(pass.stratumY) + v) / float(pass.perAxis)) / float(pass.faceSize);
-	const vec3 dirScene = pass.skyToScene * normalize(FaceToDir(pass.face, s, t));
+	const vec3 dirScene = pass.skyToScene * TexelJitterDirection(pass.faceSize, pass.face, x, y, pass.stratumX, pass.stratumY, pass.perAxis,
+		uvec2(pass.seedLo, pass.seedHi));
 	const float solid = TexelSolidAngle(pass.faceSize, x, y) * pass.weight;
 
 	RayResult result;

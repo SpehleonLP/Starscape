@@ -146,6 +146,18 @@ Expected<std::vector<std::array<uint32_t, 4>>> ProbePhilox(Device& device, std::
 	return blocks;
 }
 
+Expected<std::vector<std::array<float, 3>>> ProbeJitterDirection(Device& device, std::span<JitterQuery const> queries, uint64_t seed)
+{
+	static_assert(sizeof(JitterQuery) == 7 * sizeof(uint32_t));
+	std::vector<uint32_t> inputs(queries.size() * 7);
+	std::memcpy(inputs.data(), queries.data(), queries.size_bytes());
+	Run run(device);
+	STARSCAPE_TRY(run.Execute(3, uint32_t(queries.size()), seed, {}, inputs, queries.size() * 3));
+	std::vector<std::array<float, 3>> directions(queries.size());
+	std::memcpy(directions.data(), run.Output(), directions.size() * sizeof directions[0]);
+	return directions;
+}
+
 Expected<std::vector<GalaxySample>> ProbeEvaluate(Device& device, Galaxy const& galaxy, std::span<glm::dvec3 const> points)
 {
 	ScalarWriter packed;

@@ -43,6 +43,8 @@ struct Interval
 // Sorted, merged stretches of the ray inside any galaxy's bounding sphere, clipped to [sMin, maxDistance].
 void RayIntervals(PreparedScene const& scene, glm::dvec3 dirScene, double maxDistance, std::vector<Interval>& out);
 
+// Test probe of the host walk: the transmittance it reaches `distance` along `dirSky` with. The star re-march uses
+// the walk's transmittance and returns it only for a drawn star, so this is how a test holds it to exp(-k tau).
 glm::dvec3 TransmittanceTo(PreparedScene const& scene, MarchParams const& params, glm::dvec3 dirSky, double distance);
 
 // Expected star counts by log10 of apparent flux, for choosing the threshold that meets a star budget.

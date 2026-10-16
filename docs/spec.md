@@ -41,7 +41,8 @@ include `include/kre_starscape.h` and read the file themselves.
 - Physically checkable output: star counts, total flux and extinction match
   analytic expectations under machine-checked tests.
 - Deterministic: the same scene produces byte-identical output on any thread count and in any run on the same GPU and driver.
-- Cook time is not a constraint. Correctness and quality are.
+- Cook time does not limit correctness, which analytic tests hold. Turnaround matters for look
+  development, which the GPU march serves.
 
 ## Non-goals (this spec)
 
@@ -208,7 +209,8 @@ The emissivity is in the same units as a star bin's j_i (Normalisation, below).
 In the march: `EvaluateLocal` returns the summed gas emissivity of a point as an RGB value on
 `GalaxySample`. L̄ reaches the galaxy as a derived field that `PrepareScene` fills
 from the population tables, so the galaxy code needs no population lookup.
-`Walk` sums it over galaxies onto the `Step`. `MarchRay` adds
+The GPU march sums it over galaxies at each step and adds it to the ray's diffuse radiance
+attenuated by the transmittance up to that step:
 
     radiance += weight · gas · T · ds
 
@@ -463,8 +465,11 @@ All random draws use a counter-based generator (Philox 4×32-10) keyed on
 (seed, purpose, texel, bin, index). Noise fields are seeded per galaxy. No draw
 depends on thread scheduling, so output is byte-identical on any thread count.
 The march runs on the GPU (`docs/specs/2026-10-15-gpu-march.md`), one invocation
-per texel; the calibration and the star draws run on CPU threads, distributed over
-texels with a shared atomic counter, each texel's results written to its own slot.
+per texel. It needs a Vulkan 1.2 device with a compute queue, `shaderInt64` and
+`scalarBlockLayout` that is not a software (CPU-type) device; without one a cook
+is an input error naming what the machine lacks. The calibration and the star
+draws run on CPU threads, distributed over texels with a shared atomic counter,
+each texel's results written to its own slot.
 The bytes depend on the GPU and its driver, never on the run.
 
 ## 3. File format

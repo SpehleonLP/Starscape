@@ -8,6 +8,10 @@
 #include <kre_starscape.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <format>
+#include <string>
 #include <thread>
 
 using namespace starscape;
@@ -74,8 +78,9 @@ void CheckBall(Scene const& scene, Cooked const& cooked)
 
 // Σ radiance × texel solid angle per channel: the whole sky's flux. A bright limiting magnitude keeps every star
 // diffuse, so this is all the light.
-glm::dvec3 SkyFlux(Scene scene)
+glm::dvec3 SkyFlux(Scene const& base)
 {
+	Scene scene = base;
 	scene.output.limitingMagnitude = -30.0;
 	Expected<Cooked> const cooked = Cook(scene, Options());
 	REQUIRE(cooked.has_value());
@@ -277,8 +282,9 @@ TEST_CASE("Large-scale gas, the rim and reflection are dimmed by the dust in fro
 	{
 		std::string const name = light.name;
 		CAPTURE(name);
-		auto lit = [&](Scene scene)
+		auto lit = [&](Scene const& base)
 		{
+			Scene scene = base;
 			light.apply(scene.galaxies[0]);
 			return SkyFlux(scene);
 		};
@@ -334,18 +340,25 @@ TEST_CASE("More galaxies than the GPU takes are refused, naming the cap")
 TEST_CASE("A cook is the same bytes twice in one process and in a separate CLI run")
 {
 	// Mutation: mixing the clock into the march's jitter seed (march.cpp PassConstants) makes every run differ.
-	// cli-determinism (the ctest fixture) leaves the CLI's cook of the same scene in det1.kre_starscape.
-	Expected<Scene> const scene = LoadScene(STARSCAPE_SOURCE_DIR "/tests/data/tiny.toml");
+	// The CLI's file is removed first and written here, so the comparison never sees bytes from an older binary.
+	char const* const scenePath = STARSCAPE_SOURCE_DIR "/tests/data/determinism.toml";
+	std::filesystem::path const cliOut = STARSCAPE_CLI_OUT "/determinism-gate.kre_starscape";
+	std::filesystem::remove(cliOut);
+	std::string const command = std::format("\"{}\" cook \"{}\" -o \"{}\" > /dev/null", STARSCAPE_CLI, scenePath, cliOut.string());
+	REQUIRE(std::system(command.c_str()) == 0);
+	Expected<std::vector<uint8_t>> const cli = ReadFileBytes(cliOut);
+	REQUIRE(cli.has_value());
+
+	Expected<Scene> const scene = LoadScene(scenePath);
 	REQUIRE(scene.has_value());
 	Expected<Cooked> const first = Cook(*scene, Options());
 	Expected<Cooked> const second = Cook(*scene, Options());
 	REQUIRE(first.has_value());
 	REQUIRE(second.has_value());
+	REQUIRE(first->stars.size() > 0);
 	std::vector<uint8_t> const a = BuildFile(*first, scene->hash);
 	std::vector<uint8_t> const b = BuildFile(*second, scene->hash);
 	CHECK(a == b);
-	Expected<std::vector<uint8_t>> const cli = ReadFileBytes(STARSCAPE_CLI_OUT "/det1.kre_starscape");
-	REQUIRE_MESSAGE(cli.has_value(), "run through ctest, whose cli-determinism fixture writes the CLI's cook");
 	CHECK(*cli == a);
 }
 

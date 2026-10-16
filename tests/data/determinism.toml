@@ -1,0 +1,13 @@
+# The determinism gate's scene: sixteen jittered passes, and a given limiting magnitude, which skips the calibration
+# and keeps the star draws to a few dozen.
+[output]
+face_size = 16
+limiting_magnitude = 2.0
+quality = "final"
+preview = { width = 256 }
+
+[observer]
+position = [8200.0, 0.0, 20.0]
+
+[[galaxy]]
+preset = "milky-way"

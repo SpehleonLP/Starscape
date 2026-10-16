@@ -1,3 +1,4 @@
+#include "cook.h"
 #include "galaxy.h"
 #include "gpu/device.h"
 #include "gpu/pack.h"
@@ -7,6 +8,7 @@
 #include "rng.h"
 #include "scene.h"
 #include <doctest.h>
+#include <kre_starscape.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -134,6 +136,51 @@ TEST_CASE("The GPU's lattice hash and Philox equal the CPU's, bit for bit")
 	{
 		REQUIRE((*blocks)[i] == Philox4x32_10(counters[i], {0x89ABCDEFu, 0x01234567u}));
 	}
+}
+
+TEST_CASE("The march's ray directions are the host's pass strata jittered by the host's Philox stream")
+{
+	// Mutation: swapping u and v, or dropping the stratum offset, in face.glsl's TexelJitterDirection moves rays by
+	// up to a texel and reddens this.
+	auto device = OpenDevice({.allowSoftware = true});
+	REQUIRE(device.has_value());
+	uint64_t const seed = 0x5EED5EED00000007ull;
+	RandomStream pick(4, Purpose::Test, 0, 0, 0);
+	std::vector<JitterQuery> queries;
+	for (uint32_t const faceSize : {4u, 64u, 2048u})
+	{
+		for (int const perAxis : {1, 4})
+		{
+			for (int i = 0; i < 4000; ++i)
+			{
+				Stratum const s = PassStratum(perAxis, int(pick.NextU32() % uint32_t(perAxis * perAxis)));
+				queries.push_back({faceSize, pick.NextU32() % 6, pick.NextU32() % faceSize, pick.NextU32() % faceSize, uint32_t(s.x), uint32_t(s.y),
+					uint32_t(perAxis)});
+			}
+		}
+	}
+	auto directions = ProbeJitterDirection(**device, queries, seed);
+	REQUIRE(directions.has_value());
+	// The host draws in double; the GPU rounds u, v, s, t and the normalisation to float, so it cannot be bit-exact.
+	// Measured worst 1.57e-7 = 1.3 float epsilons of a unit vector; the bound is 2. A jitter or stratum error moves
+	// a ray by at least a stratum, 2^-11 of the face even at face 2048, four orders of magnitude more.
+	double worst = 0.0;
+	for (size_t i = 0; i < queries.size(); ++i)
+	{
+		JitterQuery const& q = queries[i];
+		uint32_t const texel = (q.face * q.faceSize + q.y) * q.faceSize + q.x;
+		RandomStream rng(seed, Purpose::Jitter, texel, 0, 0, q.stratumY * q.perAxis + q.stratumX);
+		double const u = rng.NextDouble();
+		double const v = rng.NextDouble();
+		double const s = (q.x + (q.stratumX + u) / q.perAxis) / q.faceSize;
+		double const t = (q.y + (q.stratumY + v) / q.perAxis) / q.faceSize;
+		std::array<double, 3> const d = kre_starscape::FaceToDir(q.face, s, t);
+		glm::dvec3 const host = glm::normalize(glm::dvec3(d[0], d[1], d[2]));
+		glm::dvec3 const gpu((*directions)[i][0], (*directions)[i][1], (*directions)[i][2]);
+		worst = std::max(worst, glm::length(gpu - host));
+	}
+	MESSAGE("worst direction error ", worst, " (float epsilon ", 0x1p-23, ")");
+	CHECK(worst < 2.0 * 0x1p-23);
 }
 
 TEST_CASE("The GPU evaluates every galaxy of the stylized scene within float precision of the CPU")
