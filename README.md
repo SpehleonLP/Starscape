@@ -14,7 +14,10 @@ cmake --build Build
 ctest --test-dir Build --output-on-failure
 ```
 
-C++23 (GCC 13+). Dependencies are vendored in `third_party/` (see `third_party/VERSIONS`).
+C++23 (GCC 13+) and `glslangValidator` at build time. Dependencies are vendored in `third_party/` (see
+`third_party/VERSIONS`). The sky is marched on the GPU with Vulkan compute: a cook needs a Vulkan 1.2 GPU with
+`shaderInt64` and `scalarBlockLayout`, and without one it refuses with exit 1, saying what the machine lacks. On such
+a machine the tests that cook report skipped.
 
 ## Use
 
@@ -26,7 +29,8 @@ starscape preview sky.kre_starscape -o bright.hdr --exposure 4
 starscape inspect sky.kre_starscape
 ```
 
-Options: `--threads N` (cook, preview; output is byte-identical for any thread count),
+Options: `--threads N` (cook: the calibration and the star draws; preview; output is byte-identical for any
+thread count),
 `--quick` and `--draft` (cook), `--width N` (cook and preview: preview width) and `--exposure EV` (preview). Exit codes: 0 success,
 1 invalid input or usage, 2 I/O failure.
 

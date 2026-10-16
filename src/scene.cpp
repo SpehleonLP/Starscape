@@ -577,7 +577,6 @@ Expected<void> ReadOutput(TableReader& root, Output& output)
 			return previewReader.Fail("width", "must be even (the preview is width × width/2)");
 		}
 		output.previewWidth = uint32_t(width);
-		STARSCAPE_TRY(previewReader.Boolean("march", output.previewMarch));
 		STARSCAPE_TRY(previewReader.Finish());
 	}
 	return reader.Finish();

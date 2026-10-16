@@ -75,7 +75,7 @@ void main()
 		result.budget[bin] = 0.0;
 	}
 
-	// The ray's stretches inside each galaxy's bound, sorted and merged as RayIntervals does.
+	// The ray's stretches inside each galaxy's bound, sorted and merged as RayIntervals does for the star re-march.
 	vec3 dirLocal[kMaxGalaxies];
 	float begins[kMaxGalaxies];
 	float ends[kMaxGalaxies];
@@ -147,7 +147,7 @@ void main()
 			float extinction = 0.0;
 			vec3 gas = vec3(0.0);
 			int partCount = 0;
-			// Every galaxy's extinction is summed before any part sees the step's transmittance, as on the CPU.
+			// Every galaxy's extinction is summed before any part sees the step's transmittance.
 			for (uint g = 0u; g < pass.galaxyCount; ++g)
 			{
 				const vec3 p = anchor[g] + mid * dirLocal[g];
@@ -169,7 +169,7 @@ void main()
 			result.radiance += (pass.weight * ds) * (transmittance * gas);
 			for (int k = 0; k < partCount; ++k)
 			{
-				AccumulatePart(populations[parts[k].population], parts[k].density, pass.fluxThreshold, sNow, sNow + ds, ds,
+				AccumulatePart(populations[parts[k].population], parts[k].density, pass.fluxThreshold, sNow, ds,
 					transmittance, pass.weight, solid, result);
 			}
 			depth += extinction * ds;

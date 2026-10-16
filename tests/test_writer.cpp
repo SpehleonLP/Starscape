@@ -143,15 +143,6 @@ TEST_CASE("The value scale is a power of two that keeps the maximum in range")
 	CHECK(ChooseValueScale(1e300) == std::ldexp(1.0f, -100));
 }
 
-TEST_CASE("Cooks are byte-identical on any thread count")
-{
-	// Mutation: seeding draws by thread index reddens this test.
-	Scene const scene = MilkyWayScene({8200.0, 0.0, 20.0});   // limiting magnitude 6, face 16, quick
-	std::vector<uint8_t> const one = BuildFile(Cook(scene, {.threads = 1, .device = DeviceChoice::Cpu}).value(), scene.hash);
-	std::vector<uint8_t> const many = BuildFile(Cook(scene, {.threads = 8, .device = DeviceChoice::Cpu}).value(), scene.hash);
-	CHECK(one == many);
-}
-
 TEST_CASE("Writes land atomically")
 {
 	// Mutation: leaving the .partial file behind reddens this test.

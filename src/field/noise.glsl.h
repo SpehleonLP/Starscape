@@ -1,4 +1,4 @@
-// Perlin gradient noise and its octave sums, shared by the CPU and the GPU.
+// Perlin gradient noise and its octave sums, shared by the host and the GPU.
 #ifndef STARSCAPE_FIELD_NOISE_GLSL_H
 #define STARSCAPE_FIELD_NOISE_GLSL_H
 
@@ -98,11 +98,11 @@ FIELD_INLINE real GradientNoise(real3 p, uint64_t seed)
 }
 
 // An octave sum's position in lattice space. The octave loop below is shared; how the position is held is not.
-// The CPU keeps today's double arithmetic, so the reference does not move. A float holding the top octave's
+// The host holds the position in double. A float holding the top octave's
 // lattice coordinate (thousands of cells out) resolves only ~1e-3 of a cell there, and the dust's log-normal
 // multiplies that error by σ / kRidgedSigma ≈ 26. So the GPU holds the integer cell exactly in 64 bits and
 // only the fraction in float: each doubling moves the whole part of 2f + shift into the cell, so the hash sees
-// the cell the CPU's floor() gives and the fraction keeps float's full precision near [0, 1).
+// the cell the host's floor() gives and the fraction keeps float's full precision near [0, 1).
 #ifdef __cplusplus
 
 struct NoisePoint

@@ -45,10 +45,6 @@ void RayIntervals(PreparedScene const& scene, glm::dvec3 dirScene, double maxDis
 
 glm::dvec3 TransmittanceTo(PreparedScene const& scene, MarchParams const& params, glm::dvec3 dirSky, double distance);
 
-// Adds `weight` × this ray's diffuse radiance and its point budget over `sampleSolidAngle` to `out`.
-void MarchRay(PreparedScene const& scene, MarchParams const& params, glm::dvec3 dirSky, double fluxThreshold,
-	double sampleSolidAngle, double weight, RayResult& out);
-
 // Expected star counts by log10 of apparent flux, for choosing the threshold that meets a star budget.
 struct FluxHistogram
 {

@@ -27,7 +27,6 @@ struct Output
 	Quality                 quality = Quality::Final;
 	uint64_t                seed = 1;   // star draws and jitter; galaxies carry their own noise seeds
 	uint32_t                previewWidth = 8192;
-	bool                    previewMarch = false;
 };
 
 struct Observer

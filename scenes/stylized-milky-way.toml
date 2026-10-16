@@ -7,7 +7,7 @@
 face_size    = 256
 target_stars = 4000
 quality      = "final"
-preview      = { width = 8192, march = false }
+preview      = { width = 8192 }
 
 [observer]
 position      = [8200.0, 0.0, 20.0]

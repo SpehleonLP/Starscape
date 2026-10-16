@@ -1,5 +1,5 @@
 // Shared between C++ (double precision, glm) and GLSL (float). Everything in src/field/ is written once and
-// compiled by both, so the CPU reference and the GPU march evaluate the same model. Code here obeys both
+// compiled by both, so the GPU march and the host's calibration and star re-march evaluate the same model. Code here obeys both
 // languages: no lambdas, templates, std:: calls, auto or recursion; `const real x`, never `real const x`;
 // and no name GLSL reserves or uses as a built-in (out, sample, step, distance, length, texture, ...).
 #ifndef STARSCAPE_FIELD_COMMON_GLSL_H
@@ -58,13 +58,13 @@ inline double atan(double y, double x)
 	return std::atan2(y, x);
 }
 
-// C's fmod, kept exact on the CPU so the reference does not move; GLSL spells it out below.
+// C's fmod, exact in double on the host; GLSL spells it out below.
 inline double FMod(double x, double y)
 {
 	return std::fmod(x, y);
 }
 
-// The disc radius of (x, y), exact on the CPU so the reference does not move; GLSL has no hypot.
+// The disc radius of (x, y), exact in double on the host; GLSL has no hypot.
 inline double Hypot(double x, double y)
 {
 	return std::hypot(x, y);

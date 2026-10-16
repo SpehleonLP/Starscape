@@ -9,15 +9,14 @@ namespace starscape
 namespace
 {
 
+// The calibration and the star re-march need a step's extent, its transmittance and its stars; the light of its
+// gas is the GPU march's alone.
 struct Step
 {
-	double                        s;
-	double                        ds;
-	double                        a;   // s - ds/2
-	double                        b;   // s + ds/2
+	double                        a;
+	double                        b;
 	glm::dvec3                    transmittance;
 	std::span<Contribution const> parts;
-	glm::dvec3                    gas;   // glowing gas: radiance per parsec at the midpoint, before transmittance
 };
 
 // Steps every interval at its midpoints, handing each step's contributions and the
@@ -40,7 +39,6 @@ double Walk(PreparedScene const& scene, MarchParams const& params, glm::dvec3 di
 			glm::dvec3 const position = scene.origin + mid * dir;
 			parts.clear();
 			double extinction = 0.0;
-			glm::dvec3 gas(0.0);
 			for (PreparedGalaxy const& galaxy : scene.galaxies)
 			{
 				glm::dvec3 const offset = position - galaxy.position;
@@ -52,9 +50,8 @@ double Walk(PreparedScene const& scene, MarchParams const& params, glm::dvec3 di
 				Evaluate(galaxy, position, sample);
 				parts.insert(parts.end(), sample.parts.begin(), sample.parts.begin() + sample.count);
 				extinction += sample.extinction;
-				gas += sample.gas;
 			}
-			visit(Step{mid, ds, s, s + ds, TransmittanceForDepth(depth + 0.5 * extinction * ds), parts, gas});
+			visit(Step{s, s + ds, TransmittanceForDepth(depth + 0.5 * extinction * ds), parts});
 			depth += extinction * ds;
 			s = ds == remaining ? interval.end : s + ds;
 		}
@@ -138,21 +135,6 @@ void RayIntervals(PreparedScene const& scene, glm::dvec3 dir, double maxDistance
 glm::dvec3 TransmittanceTo(PreparedScene const& scene, MarchParams const& params, glm::dvec3 dirSky, double distance)
 {
 	return TransmittanceForDepth(Walk(scene, params, scene.skyToScene * dirSky, distance, [](Step const&) {}));
-}
-
-void MarchRay(PreparedScene const& scene, MarchParams const& params, glm::dvec3 dirSky, double fluxThreshold,
-	double sampleSolidAngle, double weight, RayResult& out)
-{
-	Walk(scene, params, scene.skyToScene * dirSky, HUGE_VAL, [&](Step const& step)
-	{
-		// Gas is diffuse light only: it has no stars to resolve, so it never touches the budget or the threshold.
-		out.radiance += (weight * step.ds) * (step.transmittance * step.gas);
-		for (Contribution const& part : step.parts)
-		{
-			AccumulatePart(scene.populations[size_t(part.population)], part.density, fluxThreshold, step.a, step.b, step.ds,
-				step.transmittance, weight, sampleSolidAngle, out);
-		}
-	});
 }
 
 void FluxHistogram::Add(double flux, double stars)

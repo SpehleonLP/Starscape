@@ -38,24 +38,20 @@ struct Cooked
 	double                  fluxThreshold = 0.0;
 	CookStats               stats;
 	int                     passes = 0;   // how many passes the snapshot holds
-	std::string             device;       // what marched, e.g. "CPU, 8 threads"
+	std::string             device;       // what marched: the GPU, its driver and queue priority
 	// Expected resolved stars per texel and bin, the mean of the passes so far: what the stars were drawn from.
 	// Empty unless CookOptions::keepBudget asked for it; at face 2048 it is 2.4 GB.
 	std::vector<std::array<float, kBins>> budget;
 };
 
-enum class DeviceChoice { Auto, Gpu, Cpu };
-
 struct CookOptions
 {
-	unsigned                                                 threads = 1;
+	unsigned                                                 threads = 1;   // calibration and star draws
 	std::optional<Quality>                                   quality{};    // overrides the scene's
 	std::function<void(std::string_view phase, double done)> progress{};
 	// Called after every pass with a complete sky; an error aborts the cook.
 	std::function<Expected<void>(Cooked const& cooked, int pass, int passes)> onPass{};
 	int                                                      stopAfterPasses = 0;   // test hook: 0 means all passes
-	DeviceChoice                                             device = DeviceChoice::Auto;
-	std::function<void(std::string_view)>                    log{};   // one line per notable choice, e.g. falling back to the CPU
 	bool                                                     keepBudget = false;   // fill Cooked::budget (tests compare it)
 };
 
@@ -72,9 +68,6 @@ struct Stratum
 // Pass `pass` of perAxis² visits this stratum; every prefix of passes stays spread over the texel.
 // perAxis must be a power of two.
 Stratum PassStratum(int perAxis, int pass);
-
-// The direction of the ray through stratum `s` of `texel`, jittered by (u, v) in [0, 1).
-glm::dvec3 TexelJitterDirection(uint32_t faceSize, uint32_t texel, int perAxis, Stratum s, double u, double v);
 
 // The running sums a pass adds to: per texel, Σ weight · radiance and Σ budget.
 struct PassSums
@@ -93,7 +86,8 @@ struct PassSpec
 	uint64_t seed;
 };
 
-// Fires one ray per texel through `spec.stratum` and adds it to `sums`. The CPU and GPU march implement it.
+// Fires one ray per texel through `spec.stratum` and adds it to `sums`. The GPU march implements it; the interface
+// keeps Vulkan out of everything that includes the cook.
 class PassMarcher
 {
 public:
@@ -108,7 +102,8 @@ inline constexpr double kTileSeconds = 0.25;
 // The next dispatch's rows: scaled toward `target` seconds, at most doubling, clamped to [1, faceSize].
 int NextTileRows(int rows, double seconds, int faceSize, double target = kTileSeconds);
 
-// An input error when the threshold would resolve more than kMaxStars points.
+// An input error when no GPU can march the scene (saying why), or when the threshold would resolve more than
+// kMaxStars points.
 Expected<Cooked> Cook(Scene const& scene, CookOptions const& options);
 
 FluxHistogram CalibrationHistogram(PreparedScene const& scene, MarchParams const& params, uint32_t faceSize, unsigned threads);

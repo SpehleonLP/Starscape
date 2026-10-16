@@ -55,14 +55,6 @@ Stratum PassStratum(int perAxis, int pass)
 	return s;
 }
 
-glm::dvec3 TexelJitterDirection(uint32_t faceSize, uint32_t texel, int perAxis, Stratum s, double u, double v)
-{
-	TexelCoord const c = Decompose(faceSize, texel);
-	double const sx = (c.x + (s.x + u) / perAxis) / faceSize;
-	double const ty = (c.y + (s.y + v) / perAxis) / faceSize;
-	return FaceDirection(c.face, sx, ty);
-}
-
 glm::dvec3 TexelCentre(uint32_t faceSize, uint32_t texel)
 {
 	TexelCoord const c = Decompose(faceSize, texel);
@@ -151,58 +143,6 @@ FluxHistogram CalibrationHistogram(PreparedScene const& scene, MarchParams const
 
 namespace
 {
-
-class CpuMarcher final : public PassMarcher
-{
-public:
-	CpuMarcher(PreparedScene const& prepared, MarchParams const& params, unsigned threads, std::function<void(double)> progress)
-	: m_prepared(prepared), m_params(params), m_threads(threads), m_progress(std::move(progress))
-	{
-	}
-
-	Expected<void> MarchPass(PassSpec const& spec, PassSums& sums) override
-	{
-		uint32_t const size = spec.faceSize;
-		uint32_t const texels = 6 * size * size;
-		double const weight = 1.0 / double(spec.perAxis * spec.perAxis);
-		uint32_t const stratumIndex = uint32_t(spec.stratum.y * spec.perAxis + spec.stratum.x);
-		ParallelFor(texels, m_threads, [&](uint32_t texel)
-		{
-			TexelCoord const c = Decompose(size, texel);
-			// The block a nested-loop draw of stratum k reached: each sample takes one Philox block.
-			RandomStream rng(spec.seed, Purpose::Jitter, texel, 0, 0, stratumIndex);
-			double const u = rng.NextDouble();
-			double const v = rng.NextDouble();
-			RayResult result;
-			MarchRay(m_prepared, m_params, TexelJitterDirection(size, texel, spec.perAxis, spec.stratum, u, v), spec.fluxThreshold,
-				kre_starscape::TexelSolidAngle(size, c.x, c.y) * weight, weight, result);
-			sums.radiance[texel] += result.radiance;
-			for (int bin = 0; bin < kBins; ++bin)
-			{
-				sums.budget[texel][size_t(bin)] += float(result.budget[size_t(bin)]);
-			}
-		}, [&](uint32_t done)
-		{
-			if (m_progress)
-			{
-				m_progress(double(done) / double(texels));
-			}
-		});
-		return {};
-	}
-
-	// ParallelFor treats 0 threads as one, so the name reports what actually runs.
-	std::string Name() const override
-	{
-		return std::format("CPU, {} threads", std::max(1u, m_threads));
-	}
-
-private:
-	PreparedScene const&        m_prepared;
-	MarchParams                 m_params;
-	unsigned                    m_threads;
-	std::function<void(double)> m_progress;
-};
 
 // A complete sky from the passes so far: the sums scaled to their mean, the bound checks, and stars drawn
 // from that mean budget. The Poisson and star streams are keyed by texel and bin, never by pass, so a
@@ -348,31 +288,12 @@ Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 		}
 	};
 
-	// The marcher is chosen first so a --device gpu that cannot be had fails before the calibration, not after it.
+	// The marcher is opened first so a machine without a usable GPU fails before the calibration, not after it.
 	int const perAxis = params.samplesPerAxis;
 	int const passes = perAxis * perAxis;
 	int pass = 0;
-	auto marchProgress = [&](double done) { report("march", (double(pass) + done) / double(passes)); };
-	CpuMarcher cpu(prepared, params, options.threads, marchProgress);
-	std::unique_ptr<PassMarcher> gpuMarcher;
-	if (options.device != DeviceChoice::Cpu)
-	{
-		Expected<std::unique_ptr<PassMarcher>> opened = OpenGpuMarcher(prepared, params, size, marchProgress);
-		if (opened)
-		{
-			gpuMarcher = std::move(*opened);
-		}
-		else if (options.device == DeviceChoice::Gpu)
-		{
-			return std::unexpected(std::move(opened.error()));
-		}
-		else if (options.log)
-		{
-			options.log(std::format("marching on the CPU: {}", opened.error().message));
-		}
-	}
-	PassMarcher& marcher = gpuMarcher ? *gpuMarcher : static_cast<PassMarcher&>(cpu);
-	std::string const deviceName = marcher.Name();
+	STARSCAPE_TRY_ASSIGN(marcher, OpenGpuMarcher(prepared, params, size, [&](double done) { report("march", (double(pass) + done) / double(passes)); }));
+	std::string const deviceName = marcher->Name();
 	// 1. The flux threshold: given, or the one that leaves `target_stars` resolved.
 	double fluxThreshold = 0.0;
 	bool budgetUnreachable = false;
@@ -398,7 +319,7 @@ Expected<Cooked> Cook(Scene const& scene, CookOptions const& options)
 	for (; pass < passes; ++pass)
 	{
 		PassSpec const spec{size, perAxis, PassStratum(perAxis, pass), fluxThreshold, scene.output.seed};
-		STARSCAPE_TRY(marcher.MarchPass(spec, sums));
+		STARSCAPE_TRY(marcher->MarchPass(spec, sums));
 		// The last snapshot goes before the next is built, so two skies (gigabytes each at face 2048) never coexist.
 		latest.reset();
 		STARSCAPE_TRY_ASSIGN(snapshot, Snapshot(scene, prepared, params, options, fluxThreshold, budgetUnreachable, sums, pass + 1, perAxis, deviceName));

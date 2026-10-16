@@ -146,7 +146,7 @@ public:
 		VkDeviceSize const sumBytes = VkDeviceSize(m_faceSize) * m_faceSize * kSumsPerTexel * sizeof(float);
 
 		// Every storage buffer is bound whole, so each must fit one binding and one allocation; checked before any
-		// allocation, so a face too large for this device falls back to the CPU (or refuses) with the reason. The
+		// allocation, so a face too large for this device is refused, with the reason, before anything is allocated. The
 		// sums' staging buffer is the same size as the sums, and the upload's is the three small tables together.
 		std::array<std::pair<char const*, VkDeviceSize>, 4> const storage{{
 			{"galaxy", sizes[0]}, {"frame", sizes[1]}, {"population", sizes[2]}, {"face-sum", sumBytes}}};
@@ -328,12 +328,17 @@ private:
 Expected<std::unique_ptr<PassMarcher>> OpenGpuMarcher(PreparedScene const& prepared, MarchParams const& params, uint32_t faceSize,
 	std::function<void(double)> progress, double tileSeconds)
 {
-	STARSCAPE_TRY_ASSIGN(device, gpu::OpenDevice({}));
+	Expected<std::unique_ptr<Device>> device = gpu::OpenDevice({});
+	if (!device)
+	{
+		// The sky is marched only on the GPU: without one the cook stops here, and says what the machine lacks.
+		return InputError(std::format("no GPU to march on: {}", device.error().message));
+	}
 	if (prepared.galaxies.size() > kMaxGalaxies)
 	{
 		return InputError(std::format("the GPU march takes at most {} galaxies; this scene has {}", kMaxGalaxies, prepared.galaxies.size()));
 	}
-	auto marcher = std::make_unique<GpuMarcher>(std::move(device), prepared, params, faceSize, std::move(progress), tileSeconds);
+	auto marcher = std::make_unique<GpuMarcher>(std::move(*device), prepared, params, faceSize, std::move(progress), tileSeconds);
 	STARSCAPE_TRY(marcher->Build(prepared));
 	return marcher;
 }

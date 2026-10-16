@@ -32,22 +32,10 @@ if(NOT MSVC)
 endif()
 target_link_libraries(starscape-core PUBLIC Threads::Threads)
 
-# The GPU march: Vulkan loaded at run time through volk, so a binary without a Vulkan driver still runs
-# (on the CPU); shaders compiled at build time and embedded, so it needs no files beside it.
-find_program(GLSLANG_VALIDATOR glslangValidator)
-if(GLSLANG_VALIDATOR)
-	set(STARSCAPE_GPU_DEFAULT ON)
-else()
-	set(STARSCAPE_GPU_DEFAULT OFF)
-endif()
-option(STARSCAPE_GPU "Build the Vulkan compute march" ${STARSCAPE_GPU_DEFAULT})
-if(STARSCAPE_GPU AND NOT GLSLANG_VALIDATOR)
-	message(WARNING "STARSCAPE_GPU needs glslangValidator; building without the GPU march")
-	set(STARSCAPE_GPU OFF)
-endif()
-if(NOT STARSCAPE_GPU)
-	message(STATUS "Starscape: GPU march off; cooks run on the CPU")
-endif()
+# The sky is marched on the GPU. Vulkan is loaded at run time through volk, so the binary starts (and refuses to
+# cook, saying why) on a machine without a driver; shaders are compiled at build time and embedded, so it needs no
+# files beside it.
+find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 
 set(SHADER_OUT ${CMAKE_CURRENT_BINARY_DIR}/shaders)
 file(MAKE_DIRECTORY ${SHADER_OUT})
@@ -76,28 +64,23 @@ function(starscape_shader name)
 	set_property(GLOBAL APPEND PROPERTY STARSCAPE_SHADER_HEADERS ${SHADER_OUT}/${name}.spv.h)
 endfunction()
 
-if(STARSCAPE_GPU)
-	add_library(starscape-volk STATIC third_party/volk/volk.c)
-	target_include_directories(starscape-volk SYSTEM PUBLIC third_party/volk third_party/vulkan)
-	target_compile_definitions(starscape-volk PUBLIC VK_NO_PROTOTYPES)
-	target_link_libraries(starscape-volk PUBLIC ${CMAKE_DL_LIBS})
-	target_sources(starscape-core PRIVATE src/gpu/device.cpp src/gpu/pack.cpp src/gpu/probe.cpp src/gpu/march.cpp)
-	# Vulkan create-info structs are written with designated initializers that name only the fields in use;
-	# the omitted ones are meant to be zero, which is what this warning objects to.
-	if(NOT MSVC)
-		set_source_files_properties(src/gpu/device.cpp src/gpu/probe.cpp src/gpu/march.cpp PROPERTIES COMPILE_OPTIONS -Wno-missing-field-initializers)
-	endif()
-	target_compile_definitions(starscape-core PUBLIC STARSCAPE_GPU=1)
-	target_link_libraries(starscape-core PUBLIC starscape-volk)
-	target_include_directories(starscape-core PUBLIC ${SHADER_OUT})
-	starscape_shader(probe)
-	starscape_shader(march)
-	get_property(shader_headers GLOBAL PROPERTY STARSCAPE_SHADER_HEADERS)
-	add_custom_target(starscape-shaders DEPENDS ${shader_headers})
-	add_dependencies(starscape-core starscape-shaders)
-else()
-	target_sources(starscape-core PRIVATE src/gpu/march_stub.cpp)
+add_library(starscape-volk STATIC third_party/volk/volk.c)
+target_include_directories(starscape-volk SYSTEM PUBLIC third_party/volk third_party/vulkan)
+target_compile_definitions(starscape-volk PUBLIC VK_NO_PROTOTYPES)
+target_link_libraries(starscape-volk PUBLIC ${CMAKE_DL_LIBS})
+target_sources(starscape-core PRIVATE src/gpu/device.cpp src/gpu/pack.cpp src/gpu/probe.cpp src/gpu/march.cpp)
+# Vulkan create-info structs are written with designated initializers that name only the fields in use;
+# the omitted ones are meant to be zero, which is what this warning objects to.
+if(NOT MSVC)
+	set_source_files_properties(src/gpu/device.cpp src/gpu/probe.cpp src/gpu/march.cpp PROPERTIES COMPILE_OPTIONS -Wno-missing-field-initializers)
 endif()
+target_link_libraries(starscape-core PUBLIC starscape-volk)
+target_include_directories(starscape-core PUBLIC ${SHADER_OUT})
+starscape_shader(probe)
+starscape_shader(march)
+get_property(shader_headers GLOBAL PROPERTY STARSCAPE_SHADER_HEADERS)
+add_custom_target(starscape-shaders DEPENDS ${shader_headers})
+add_dependencies(starscape-core starscape-shaders)
 
 enable_testing()
 set(STARSCAPE_TESTS
@@ -117,21 +100,29 @@ add_executable(starscape-tests ${STARSCAPE_TESTS})
 target_link_libraries(starscape-tests PRIVATE starscape-core)
 add_test(NAME unit COMMAND starscape-tests)
 
-if(STARSCAPE_GPU)
-	add_executable(starscape-gpu-tests tests/gpu/main.cpp tests/gpu/test_device.cpp tests/gpu/test_probe.cpp tests/gpu/test_march.cpp)
-	target_link_libraries(starscape-gpu-tests PRIVATE starscape-core)
-	# test_scenes.h, shared with the unit tests.
-	target_include_directories(starscape-gpu-tests PRIVATE tests)
-	target_compile_definitions(starscape-gpu-tests PRIVATE STARSCAPE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-	add_test(NAME gpu COMMAND starscape-gpu-tests)
-	set_tests_properties(gpu PROPERTIES SKIP_RETURN_CODE 77)
-endif()
+set(CLI_OUT ${CMAKE_CURRENT_BINARY_DIR}/cli-test)
+file(MAKE_DIRECTORY ${CLI_OUT})
+
+# Both GPU executables exit 77, which ctest reports as skipped, when the machine has no device they can use.
+# The device and probe tests accept a software device such as llvmpipe; the cooks need what a cook needs.
+add_executable(starscape-gpu-tests tests/gpu/main.cpp tests/gpu/test_device.cpp tests/gpu/test_probe.cpp)
+target_link_libraries(starscape-gpu-tests PRIVATE starscape-core)
+target_include_directories(starscape-gpu-tests PRIVATE tests)
+target_compile_definitions(starscape-gpu-tests PRIVATE STARSCAPE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_test(NAME gpu COMMAND starscape-gpu-tests)
+set_tests_properties(gpu PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(starscape-cook-tests tests/gpu/cook_main.cpp tests/gpu/test_march.cpp tests/gpu/test_cook.cpp)
+target_link_libraries(starscape-cook-tests PRIVATE starscape-core)
+target_include_directories(starscape-cook-tests PRIVATE tests)
+target_compile_definitions(starscape-cook-tests PRIVATE STARSCAPE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" STARSCAPE_CLI_OUT="${CLI_OUT}")
+add_test(NAME cook COMMAND starscape-cook-tests)
+# The determinism case compares its in-process cooks with the CLI's.
+set_tests_properties(cook PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_REQUIRED cli-sky)
 
 add_executable(starscape src/cli.cpp)
 target_link_libraries(starscape PRIVATE starscape-core)
 
-set(CLI_OUT ${CMAKE_CURRENT_BINARY_DIR}/cli-test)
-file(MAKE_DIRECTORY ${CLI_OUT})
 file(WRITE ${CLI_OUT}/garbage.kre_starscape "this is not a sky")
 # Extra checks go in the EXTRA list (-DSTDERR_CONTAINS=..., -DABSENT=...).
 include(CMakeParseArguments)
@@ -152,21 +143,19 @@ starscape_cli_test(cli-missing-file 2 ARGV_LIST inspect ${CLI_OUT}/absent.kre_st
 starscape_cli_test(cli-usage 1 ARGV_LIST frobnicate)
 starscape_cli_test(cli-draft 0 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/scenes/milky-way-from-earth.toml -o ${CLI_OUT}/draft.kre_starscape --draft --preview ${CLI_OUT}/draft.hdr)
 starscape_cli_test(cli-draft-stylized 0 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/scenes/stylized-milky-way.toml -o ${CLI_OUT}/stylized.kre_starscape --draft --preview ${CLI_OUT}/stylized.hdr)
-starscape_cli_test(cli-device-bad 1 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.toml -o ${CLI_OUT}/dev.kre_starscape --device tpu EXTRA -DSTDERR_CONTAINS=tpu)
-# Each build's own refusal: the real device check's with the GPU march, the stub's without it.
-if(STARSCAPE_GPU)
-	set(gpu_refusal "the GPU is disabled by STARSCAPE_GPU_DISABLE")
-else()
-	set(gpu_refusal "this build has no GPU march")
-endif()
-starscape_cli_test(cli-device-gpu-disabled 1 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.toml -o ${CLI_OUT}/devg.kre_starscape --device gpu EXTRA "-DSTDERR_CONTAINS=${gpu_refusal}")
-starscape_cli_test(cli-device-auto-disabled 0 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.toml -o ${CLI_OUT}/deva.kre_starscape --device auto EXTRA "-DSTDOUT_CONTAINS=marching on the CPU: ${gpu_refusal}")
-set_tests_properties(cli-device-gpu-disabled cli-device-auto-disabled PROPERTIES ENVIRONMENT STARSCAPE_GPU_DISABLE=1)
+# The GPU refusal: no device, so no cook and no file, and stderr says why.
+starscape_cli_test(cli-no-gpu 1 ARGV_LIST cook ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.toml -o ${CLI_OUT}/nogpu.kre_starscape
+	EXTRA "-DSTDERR_CONTAINS=no GPU to march on: the GPU is disabled by STARSCAPE_GPU_DISABLE" -DABSENT=${CLI_OUT}/nogpu.kre_starscape)
+set_tests_properties(cli-no-gpu PROPERTIES ENVIRONMENT STARSCAPE_GPU_DISABLE=1)
 
 add_test(NAME cli-determinism COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:starscape> -DSCENE=${CMAKE_CURRENT_SOURCE_DIR}/tests/data/tiny.toml
 	-DOUT=${CLI_OUT} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/expect_same.cmake)
+set_tests_properties(cli-determinism PROPERTIES FIXTURES_SETUP cli-sky)
 
 # A scene that sets no nebula key and one that writes each at its default must cook to the same bytes.
 add_test(NAME cli-nebula-defaults-inert COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:starscape>
 	-DSCENE_A=${CMAKE_CURRENT_SOURCE_DIR}/tests/data/nebula-absent.toml -DSCENE_B=${CMAKE_CURRENT_SOURCE_DIR}/tests/data/nebula-defaults.toml
 	-DOUT=${CLI_OUT} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/expect_same_cooks.cmake)
+
+# On a machine with no usable GPU every cook refuses; those tests report skipped rather than failed.
+set_tests_properties(cli-cook cli-draft cli-draft-stylized cli-determinism cli-nebula-defaults-inert PROPERTIES SKIP_REGULAR_EXPRESSION "no GPU to march on")

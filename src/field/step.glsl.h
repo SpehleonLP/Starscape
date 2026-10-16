@@ -80,27 +80,28 @@ FIELD_INLINE int FirstResolvedBin(IN(PopulationTable) population, real minLumino
 	return bin;
 }
 
-// One population's stars over a step [a, b]: density and transmittance constant, distance integrated
+// One population's stars over the step [a, a + ds]: density and transmittance constant, distance integrated
 // exactly, so the resolved-or-diffuse split is not quantised to the step grid (a split decided at each step's
-// midpoint showed as ±9% ripples in star counts). `ds` is passed rather than
-// computed as b − a, which can differ from the walk's step in the last bit and would move the CPU's bytes.
-FIELD_INLINE void AccumulatePart(IN(PopulationTable) population, real density, real fluxThreshold, real a, real b,
-	real ds, real3 transmittance, real weight, real sampleSolidAngle, INOUT(RayResult) result)
+// midpoint showed as ±9% ripples in star counts). Every span inside the step is measured from `a` as a width: far
+// from the observer an absolute float distance keeps only a few bits of a short step, and widths taken as
+// differences of absolute distances would no longer add up to `ds`.
+FIELD_INLINE void AccumulatePart(IN(PopulationTable) population, real density, real fluxThreshold, real a, real ds,
+	real3 transmittance, real weight, real sampleSolidAngle, INOUT(RayResult) result)
 {
 	const int splitA = FirstResolvedBin(population, MinResolvedLuminosity(fluxThreshold, transmittance.y, a));
-	const int splitB = FirstResolvedBin(population, MinResolvedLuminosity(fluxThreshold, transmittance.y, b));
+	const int splitB = FirstResolvedBin(population, MinResolvedLuminosity(fluxThreshold, transmittance.y, a + ds));
 	// n s^2 dOmega ds stars at flux 100 L C / s^2 each: the s^2 cancels, leaving radiance 100 n L C ds.
 	result.radiance += (weight * density * 100.0 * kFluxAt10pc * ds) * (transmittance * population.lightBelow[splitA]);
 	const real lightScale = weight * density * 100.0 * kFluxAt10pc;
 	for (int bin = splitA; bin < splitB; ++bin)
 	{
-		// Resolved out to c, diffuse beyond it.
-		const real c = clamp(ResolvedDistance(fluxThreshold, transmittance.y, population.luminosity[bin]), a, b);
+		// Resolved out to a + w, diffuse beyond it.
+		const real w = clamp(ResolvedDistance(fluxThreshold, transmittance.y, population.luminosity[bin]) - a, 0.0, ds);
 		const real f = population.fraction[bin];
 		const real3 binLight = transmittance * population.chroma[bin] * (f * population.luminosity[bin]);
-		result.budget[bin] += density * f * sampleSolidAngle * CubeSpan(a, c);
-		result.radiance += (lightScale * (b - c)) * binLight;
-		result.resolvedRadiance += (lightScale * (c - a)) * binLight;
+		result.budget[bin] += density * f * sampleSolidAngle * CubeSpanFrom(a, w);
+		result.radiance += (lightScale * (ds - w)) * binLight;
+		result.resolvedRadiance += (lightScale * w) * binLight;
 	}
 	for (int bin = splitB; bin < kBins; ++bin)
 	{

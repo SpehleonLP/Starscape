@@ -1,5 +1,4 @@
 #pragma once
-#include "march.h"
 #include <kre_starscape.h>
 #include <cstdint>
 #include <vector>
@@ -23,10 +22,6 @@ glm::dvec3 PixelDirection(uint32_t width, double column, double row);   // conti
 glm::dvec3 SampleDiffuse(kre_starscape::View const& view, glm::dvec3 dir);
 
 Image RenderPreview(kre_starscape::View const& view, uint32_t width, double exposureEV, unsigned threads);
-// Marches the diffuse layer at the preview's own resolution (slow: one ray per pixel);
-// stars still come from `view`, and so does the flux threshold that splits the two.
-Image RenderMarchedPreview(PreparedScene const& scene, MarchParams const& params, kre_starscape::View const& view,
-	uint32_t width, double exposureEV, unsigned threads);
 
 std::vector<uint8_t> EncodeRadiance(Image const& image);
 

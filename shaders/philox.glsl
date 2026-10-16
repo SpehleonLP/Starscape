@@ -1,4 +1,4 @@
-// Philox4x32-10 (Salmon et al., SC11), the CPU's src/rng.h in GLSL, bit for bit.
+// Philox4x32-10 (Salmon et al., SC11), the host's src/rng.h in GLSL, bit for bit.
 uvec4 Philox4x32_10(uvec4 counter, uvec2 key)
 {
 	const uint kMultiplier0 = 0xD2511F53u;
@@ -17,7 +17,7 @@ uvec4 Philox4x32_10(uvec4 counter, uvec2 key)
 	return counter;
 }
 
-// The CPU's NextDouble, ((high >> 5)·2²⁶ + (low >> 6)) / 2⁵³, in float: no shaderFloat64 needed. Both scales
+// The host's NextDouble, ((high >> 5)·2²⁶ + (low >> 6)) / 2⁵³, in float: no shaderFloat64 needed. Both scales
 // are exact powers of two; the low term only matters when high >> 5 is 0.
 float WordsToUnit(uint high, uint low)
 {

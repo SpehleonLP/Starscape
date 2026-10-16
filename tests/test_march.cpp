@@ -9,35 +9,6 @@
 using namespace starscape;
 using namespace starscape::test;
 
-namespace
-{
-
-// Total sky flux of everything within `halfAngle` of +x (sky frame = scene frame here):
-// a polar grid fine enough that the integrand is smooth inside each cell.
-glm::dvec3 FluxInCone(PreparedScene const& prepared, MarchParams const& params, double halfAngle)
-{
-	constexpr int thetaSteps = 200;
-	constexpr int phiSteps = 64;
-	glm::dvec3 total(0.0);
-	double const dTheta = halfAngle / thetaSteps;
-	double const dPhi = 2.0 * kPi / phiSteps;
-	for (int i = 0; i < thetaSteps; ++i)
-	{
-		double const theta = (i + 0.5) * dTheta;
-		for (int j = 0; j < phiSteps; ++j)
-		{
-			double const phi = (j + 0.5) * dPhi;
-			glm::dvec3 const dir(std::cos(theta), std::sin(theta) * std::cos(phi), std::sin(theta) * std::sin(phi));
-			RayResult result;
-			MarchRay(prepared, params, dir, HUGE_VAL, 0.0, 1.0, result);
-			total += result.radiance * (std::sin(theta) * dTheta * dPhi);
-		}
-	}
-	return total;
-}
-
-}
-
 TEST_CASE("Ray intervals clip, merge and skip")
 {
 	Scene scene = BaseScene();
@@ -110,101 +81,93 @@ TEST_CASE("Counts in a uniform medium follow the Euclidean F^-3/2 law")
 	CHECK(covariance / variance == doctest::Approx(-1.5).epsilon(0.05 / 1.5));
 }
 
-TEST_CASE("A distant dust-free galaxy delivers L (10/d)² C in total")
-{
-	// Mutation: restoring an unbounded density term reddens this test.
-	Scene scene = BaseScene();
-	int const bin = 14;
-	int const population = AddSingleBinPopulation(scene, bin);
-	double const density = 0.05;
-	double const scale = 5000.0;
-	double const cutoff = 20000.0;
-	double const distance = 1.0e6;
-	Galaxy galaxy;
-	galaxy.position = {distance, 0.0, 0.0};
-	galaxy.halo = {.enabled = true, .density = density, .scale = scale, .cutoff = cutoff, .population = population};
-	scene.galaxies.push_back(galaxy);
-	PreparedScene const prepared = PrepareScene(scene);
-
-	// ∫₀^R 4π r² (1 + r/a)^-3.5 dr = 4π a³ [−2x^-½ + (4/3)x^-3/2 − 0.4x^-5/2]₁^{1+R/a}.
-	auto antiderivative = [](double x) { return -2.0 * std::pow(x, -0.5) + 4.0 / 3.0 * std::pow(x, -1.5) - 0.4 * std::pow(x, -2.5); };
-	double const stars = density * 4.0 * kPi * scale * scale * scale * (antiderivative(1.0 + cutoff / scale) - antiderivative(1.0));
-	double const expected = stars * BinLuminosity(bin) * 100.0 * kFluxAt10pc / (distance * distance);
-
-	glm::dvec3 const flux = FluxInCone(prepared, ParamsFor(Quality::Quick), std::asin(cutoff / distance) * 1.01);
-	CHECK(Luminance(flux) == doctest::Approx(expected).epsilon(0.01));
-}
-
-TEST_CASE("A uniform dust ball dims each channel by exp(-k tau)")
+TEST_CASE("The walk through a uniform dust ball dims each channel by exp(-k tau)")
 {
 	// Mutation: applying one channel's extinction to all channels reddens this test.
 	Scene scene = BaseScene();
-	int const population = AddSingleBinPopulation(scene, 14);
-	Galaxy source;
-	source.position = {1.0e6, 0.0, 0.0};
-	source.halo = {.enabled = true, .density = 0.05, .scale = 5000.0, .cutoff = 20000.0, .population = population};
-	scene.galaxies.push_back(source);
-	MarchParams const params = ParamsFor(Quality::Quick);
-	double const halfAngle = std::asin(0.02) * 1.01;
-	glm::dvec3 const clear = FluxInCone(PrepareScene(scene), params, halfAngle);
-
 	double const alpha = 0.002;
 	double const radius = 1000.0;
 	scene.galaxies.push_back(UniformDust(alpha, radius));
 	PreparedScene const dusty = PrepareScene(scene);
-	glm::dvec3 const dimmed = FluxInCone(dusty, params, halfAngle);
-
+	glm::dvec3 const transmittance = TransmittanceTo(dusty, ParamsFor(Quality::Quick), {0.0, 1.0, 0.0}, 1.0e7);
 	double const tau = alpha * (radius - scene.observer.sMin) / 1.0857;
-	CHECK(dimmed.x / clear.x == doctest::Approx(std::exp(-0.75 * tau)).epsilon(0.005).scale(0.0));
-	CHECK(dimmed.y / clear.y == doctest::Approx(std::exp(-1.00 * tau)).epsilon(0.005).scale(0.0));
-	CHECK(dimmed.z / clear.z == doctest::Approx(std::exp(-1.32 * tau)).epsilon(0.005).scale(0.0));
-	CHECK(TransmittanceTo(dusty, params, {0.0, 1.0, 0.0}, 1.0e7).y == doctest::Approx(std::exp(-tau)).epsilon(0.005).scale(0.0));
+	CHECK(transmittance.x == doctest::Approx(std::exp(-0.75 * tau)).epsilon(1e-9));
+	CHECK(transmittance.y == doctest::Approx(std::exp(-1.00 * tau)).epsilon(1e-9));
+	CHECK(transmittance.z == doctest::Approx(std::exp(-1.32 * tau)).epsilon(1e-9));
 }
 
-TEST_CASE("Points and diffuse split one ray's light without loss")
+namespace
 {
-	Scene scene = MilkyWayScene({8200.0, 0.0, 20.0});
-	PreparedScene const prepared = PrepareScene(scene);
-	MarchParams const params = ParamsFor(Quality::Quick);
-	glm::dvec3 const dir = glm::normalize(glm::dvec3(-1.0, 0.1, 0.02));
-	RayResult allDiffuse;
-	MarchRay(prepared, params, dir, HUGE_VAL, 1.0, 1.0, allDiffuse);
-	for (double const threshold : {1e-2, 1e-4, 1e-6})
+
+// One population's light and stars along a ray through a medium of constant density and transmittance, stepped
+// as the march steps it: the shared AccumulatePart, compiled here in double.
+RayResult StepThrough(PopulationTable const& population, double density, glm::dvec3 transmittance, double fluxThreshold,
+	double begin, double end)
+{
+	MarchParams const params = ParamsFor(Quality::Final);
+	RayResult result;
+	double s = begin;
+	while (s < end)
 	{
-		RayResult split;
-		MarchRay(prepared, params, dir, threshold, 1.0, 1.0, split);
-		CHECK(Luminance(split.radiance) < Luminance(allDiffuse.radiance));
-		double pointCount = 0.0;
-		for (double const count : split.budget)
+		double const ds = std::min(std::clamp(params.alpha * s, params.dsMin, params.dsMax), end - s);
+		AccumulatePart(population, density, fluxThreshold, s, ds, transmittance, 1.0, 1.0, result);
+		s += ds;
+	}
+	return result;
+}
+
+}
+
+TEST_CASE("A step splits its light between points and diffuse without loss")
+{
+	// Mutation: replacing (ds - w) with 0 in the straddling bins' diffuse radiance (step.glsl.h) loses the part of
+	// each bin's light beyond its resolved distance and reddens the sum; the cook-level energy test misses it
+	// (second order).
+	PreparedScene const prepared = PrepareScene(MilkyWayScene({8200.0, 0.0, 20.0}));
+	glm::dvec3 const transmittance(0.8, 0.7, 0.55);
+	for (PopulationTable const& population : prepared.populations)
+	{
+		RayResult const allDiffuse = StepThrough(population, 0.1, transmittance, HUGE_VAL, 0.05, 5000.0);
+		REQUIRE(Luminance(allDiffuse.radiance) > 0.0);
+		CHECK(allDiffuse.resolvedRadiance == glm::dvec3(0.0));
+		for (double const threshold : {1e-2, 1e-4, 1e-6})
 		{
-			pointCount += count;
+			CAPTURE(threshold);
+			RayResult const split = StepThrough(population, 0.1, transmittance, threshold, 0.05, 5000.0);
+			CHECK(Luminance(split.radiance) < Luminance(allDiffuse.radiance));
+			CHECK(Luminance(split.resolvedRadiance) > 0.0);
+			double pointCount = 0.0;
+			for (double const count : split.budget)
+			{
+				pointCount += count;
+			}
+			CHECK(pointCount > 0.0);
+			glm::dvec3 const total = split.radiance + split.resolvedRadiance;
+			CHECK(total.x == doctest::Approx(allDiffuse.radiance.x).epsilon(1e-9));
+			CHECK(total.y == doctest::Approx(allDiffuse.radiance.y).epsilon(1e-9));
+			CHECK(total.z == doctest::Approx(allDiffuse.radiance.z).epsilon(1e-9));
 		}
-		CHECK(pointCount > 0.0);
 	}
 }
 
-TEST_CASE("Diffuse plus resolved light of one ray is the same at every threshold")
+TEST_CASE("A step's resolved stars fill the cube of their resolved distance")
 {
-	// Mutation: replacing (step.b - c) with 0 in the straddling bins' diffuse radiance (march.cpp) loses the part of
-	// each bin's light beyond its resolved distance and reddens this; the totals-only tests miss it (second order).
-	Scene scene = MilkyWayScene({8200.0, 0.0, 20.0});
+	// Mutation: taking the straddling bins' budget over the whole step (CubeSpanFrom(a, ds)) instead of out to the
+	// resolved distance reddens this test.
+	Scene scene = BaseScene();
+	int const bin = 12;
+	int const population = AddSingleBinPopulation(scene, bin);
 	PreparedScene const prepared = PrepareScene(scene);
-	MarchParams const params = ParamsFor(Quality::Quick);
-	glm::dvec3 const dir = glm::normalize(glm::dvec3(-1.0, 0.1, 0.02));
-	RayResult allDiffuse;
-	MarchRay(prepared, params, dir, HUGE_VAL, 1.0, 1.0, allDiffuse);
-	CHECK(allDiffuse.resolvedRadiance == glm::dvec3(0.0));
-	for (double const threshold : {1e-2, 1e-4, 1e-6})
-	{
-		RayResult split;
-		MarchRay(prepared, params, dir, threshold, 1.0, 1.0, split);
-		CHECK(Luminance(split.resolvedRadiance) > 0.0);
-		CHECK(Luminance(split.radiance) > 0.0);
-		glm::dvec3 const total = split.radiance + split.resolvedRadiance;
-		CHECK(total.x == doctest::Approx(allDiffuse.radiance.x).epsilon(1e-9));
-		CHECK(total.y == doctest::Approx(allDiffuse.radiance.y).epsilon(1e-9));
-		CHECK(total.z == doctest::Approx(allDiffuse.radiance.z).epsilon(1e-9));
-	}
+	PopulationTable const& table = prepared.populations[size_t(population)];
+	double const density = 0.02;
+	double const tv = 0.6;
+	double const luminosity = table.luminosity[size_t(bin)];
+	double const threshold = luminosity * 100.0 * kFluxAt10pc * tv / (150.0 * 150.0);   // resolved out to 150 pc
+	RayResult const result = StepThrough(table, density, glm::dvec3(tv), threshold, 0.05, 400.0);
+	CHECK(result.budget[size_t(bin)] == doctest::Approx(density * (std::pow(150.0, 3.0) - std::pow(0.05, 3.0)) / 3.0).epsilon(1e-9));
+	glm::dvec3 const light = density * 100.0 * kFluxAt10pc * luminosity * tv * table.chroma[size_t(bin)];
+	CHECK(Luminance(result.radiance) == doctest::Approx(Luminance(light) * (400.0 - 150.0)).epsilon(1e-9));
+	CHECK(Luminance(result.resolvedRadiance) == doctest::Approx(Luminance(light) * (150.0 - 0.05)).epsilon(1e-9));
 }
 
 TEST_CASE("SampleStar picks a resolved distance in proportion to the count")
@@ -232,62 +195,36 @@ TEST_CASE("Star saturation moves colour, not light or counts")
 {
 	// Mutation: PrepareScene not passing starSaturation to Tabulate reddens the spread check.
 	Scene scene = MilkyWayScene({8200.0, 0.0, 20.0});
-	scene.galaxies[0].dust.enabled = false;   // grey transmittance: only then is luminance exactly kept
 	PreparedScene const physical = PrepareScene(scene);
 	scene.style.starSaturation = 4.0;
 	PreparedScene const vivid = PrepareScene(scene);
-	MarchParams const params = ParamsFor(Quality::Quick);
-	glm::dvec3 const dir = glm::normalize(glm::dvec3(-1.0, 0.1, 0.02));
+	// Grey transmittance: only then is luminance exactly kept.
+	glm::dvec3 const grey(0.7);
 	RayResult a;
 	RayResult b;
-	MarchRay(physical, params, dir, 1e-4, 1.0, 1.0, a);
-	MarchRay(vivid, params, dir, 1e-4, 1.0, 1.0, b);
+	for (size_t p = 0; p < physical.populations.size(); ++p)
+	{
+		RayResult const one = StepThrough(physical.populations[p], 0.1, grey, 1e-4, 0.05, 5000.0);
+		RayResult const other = StepThrough(vivid.populations[p], 0.1, grey, 1e-4, 0.05, 5000.0);
+		a.radiance += one.radiance;
+		b.radiance += other.radiance;
+		for (int bin = 0; bin < kBins; ++bin)
+		{
+			a.budget[size_t(bin)] += one.budget[size_t(bin)];
+			b.budget[size_t(bin)] += other.budget[size_t(bin)];
+		}
+	}
 	CHECK(Luminance(b.radiance) == doctest::Approx(Luminance(a.radiance)).epsilon(1e-12));
 	CHECK(b.budget == a.budget);
 	auto spread = [](glm::dvec3 c) { return (std::max({c.x, c.y, c.z}) - std::min({c.x, c.y, c.z})) / Luminance(c); };
 	CHECK(spread(b.radiance) > 2.0 * spread(a.radiance));
 }
 
-TEST_CASE("Gas glow is dimmed by the dust in front of it")
+TEST_CASE("Gas leaves the calibration's star counts alone")
 {
-	// Mutation: adding the gas without the step's transmittance reddens this test.
-	Scene scene = BaseScene();
-	int const population = AddSingleBinPopulation(scene, 14);
-	Galaxy source;   // dust disabled: the gas's filament factor must be 1
-	source.position = {1.0e6, 0.0, 0.0};
-	source.disk = {.enabled = true, .density = 0.05, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 20000.0, .arms = {},
-		.population = population, .armPopulation = population, .youngFraction = 0.5};
-	scene.galaxies.push_back(source);
-	MarchParams const params = ParamsFor(Quality::Quick);
-	glm::dvec3 const dir(1.0, 0.0, 0.0);
-	// The gas's own radiance: the same ray with and without glow, so the starlight cancels exactly.
-	auto gasRadiance = [&](Scene const& base)
-	{
-		RayResult dark;
-		MarchRay(PrepareScene(base), params, dir, HUGE_VAL, 1.0, 1.0, dark);
-		Scene lit = base;
-		lit.galaxies[0].disk.gas.glow = 1.0;
-		RayResult glowing;
-		MarchRay(PrepareScene(lit), params, dir, HUGE_VAL, 1.0, 1.0, glowing);
-		return glowing.radiance - dark.radiance;
-	};
-	glm::dvec3 const clear = gasRadiance(scene);
-	REQUIRE(Luminance(clear) > 0.0);
-	double const alpha = 0.002;
-	double const radius = 1000.0;
-	scene.galaxies.push_back(UniformDust(alpha, radius));
-	glm::dvec3 const dimmed = gasRadiance(scene);
-	double const tau = alpha * (radius - scene.observer.sMin) / 1.0857;
-	CHECK(dimmed.x / clear.x == doctest::Approx(std::exp(-0.75 * tau)).epsilon(0.005).scale(0.0));
-	CHECK(dimmed.y / clear.y == doctest::Approx(std::exp(-1.00 * tau)).epsilon(0.005).scale(0.0));
-	CHECK(dimmed.z / clear.z == doctest::Approx(std::exp(-1.32 * tau)).epsilon(0.005).scale(0.0));
-}
-
-TEST_CASE("Gas adds diffuse light and leaves the stars alone")
-{
-	// Mutation: adding any term (gas, large-scale, rim or reflection) to resolvedRadiance instead of
-	// radiance reddens this test. Every term is on at once, around a bubble both scenes share, so only the
-	// light terms differ between them.
+	// Mutation: PrepareScene not setting youngLight reddens the first check; any light term that leaked into a part's
+	// density would move the histogram. The GPU cook test "Gas adds diffuse light and leaves the stars alone" holds the
+	// light itself.
 	Scene scene = MilkyWayScene({8200.0, 0.0, 20.0});
 	Galaxy& galaxy = scene.galaxies[0];
 	galaxy.dust.bubbleCenter = {8200.0, 0.0, 20.0};
@@ -304,68 +241,9 @@ TEST_CASE("Gas adds diffuse light and leaves the stars alone")
 	CHECK(glowing.galaxies[0].galaxy.disk.gas.youngLight == doctest::Approx(Luminance(glowing.populations[0].lightBelow[kBins])));
 	MarchParams const params = ParamsFor(Quality::Quick);
 	glm::dvec3 const dir = glm::normalize(glm::dvec3(-1.0, 0.1, 0.02));
-	RayResult a;
-	RayResult b;
-	MarchRay(plain, params, dir, 1e-4, 1.0, 1.0, a);
-	MarchRay(glowing, params, dir, 1e-4, 1.0, 1.0, b);
-	CHECK(Luminance(b.radiance) > 1.01 * Luminance(a.radiance));
-	CHECK(b.budget == a.budget);
-	CHECK(b.resolvedRadiance == a.resolvedRadiance);
 	FluxHistogram ha;
 	FluxHistogram hb;
 	HistogramRay(plain, params, dir, 1.0, ha);
 	HistogramRay(glowing, params, dir, 1.0, hb);
 	CHECK(ha.count == hb.count);
-}
-
-TEST_CASE("Large-scale gas, the rim and reflection are dimmed by the dust in front of them")
-{
-	// Mutation: adding any one term to the gas outside the step's transmittance (e.g. straight into
-	// the radiance) leaves that term undimmed, and its section fails.
-	struct Light
-	{
-		char const* name;
-		void (*apply)(Galaxy&);
-	};
-	Light const lights[] = {
-		{"large", [](Galaxy& g) { g.disk.gas.largeGlow = 1.0; }},
-		{"rim", [](Galaxy& g) { g.dust.bubbleRim = 4.0; }},
-		{"reflection", [](Galaxy& g) { g.dust.reflection = 2.0; }},
-	};
-	for (Light const& light : lights)
-	{
-		CAPTURE(light.name);
-		Scene scene = BaseScene();
-		int const population = AddSingleBinPopulation(scene, 14);
-		Galaxy source;
-		source.position = {1.0e6, 0.0, 0.0};
-		source.disk = {.enabled = true, .density = 0.05, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 20000.0, .arms = {},
-			.population = population, .armPopulation = population, .youngFraction = 0.5};
-		// Faint dust with a bubble at the source's centre, so the rim and the reflection have something to light.
-		source.dust = {.enabled = true, .extinction = 1e-6, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 20000.0, .laneOffset = 0.0, .contrast = 1.0, .filament = 0.0,
-			.bubbleCenter = {0.0, 0.0, 0.0}, .bubbleRadius = 300.0, .bubbleHeight = 800.0};
-		scene.galaxies.push_back(source);
-		MarchParams const params = ParamsFor(Quality::Quick);
-		glm::dvec3 const dir(1.0, 0.0, 0.0);
-		auto termRadiance = [&](Scene const& base)
-		{
-			RayResult dark;
-			MarchRay(PrepareScene(base), params, dir, HUGE_VAL, 1.0, 1.0, dark);
-			Scene lit = base;
-			light.apply(lit.galaxies[0]);
-			RayResult glowing;
-			MarchRay(PrepareScene(lit), params, dir, HUGE_VAL, 1.0, 1.0, glowing);
-			return glowing.radiance - dark.radiance;
-		};
-		glm::dvec3 const clear = termRadiance(scene);
-		REQUIRE(Luminance(clear) > 0.0);
-		double const alpha = 0.002;
-		double const radius = 1000.0;
-		scene.galaxies.push_back(UniformDust(alpha, radius));
-		glm::dvec3 const dimmed = termRadiance(scene);
-		double const tau = alpha * (radius - scene.observer.sMin) / 1.0857;
-		CHECK(dimmed.x / clear.x == doctest::Approx(std::exp(-0.75 * tau)).epsilon(0.005).scale(0.0));
-		CHECK(dimmed.y / clear.y == doctest::Approx(std::exp(-1.00 * tau)).epsilon(0.005).scale(0.0));
-		CHECK(dimmed.z / clear.z == doctest::Approx(std::exp(-1.32 * tau)).epsilon(0.005).scale(0.0));
-	}
 }

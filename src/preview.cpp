@@ -159,21 +159,6 @@ Image RenderPreview(kre_starscape::View const& view, uint32_t width, double expo
 	return image;
 }
 
-Image RenderMarchedPreview(PreparedScene const& scene, MarchParams const& params, kre_starscape::View const& view,
-	uint32_t width, double exposureEV, unsigned threads)
-{
-	double const exposure = std::exp2(exposureEV);
-	double const threshold = double(view.header.fluxThreshold);
-	Image image = Render(width, threads, [&](glm::dvec3 dir)
-	{
-		RayResult result;
-		MarchRay(scene, params, dir, threshold, 0.0, 1.0, result);
-		return exposure * result.radiance;
-	});
-	SplatStars(view, exposure, image);
-	return image;
-}
-
 std::vector<uint8_t> EncodeRadiance(Image const& image)
 {
 	std::string const header = std::format("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {} +X {}\n", image.height, image.width);

@@ -1,4 +1,4 @@
-// A galaxy's description and its per-point evaluation, shared by the CPU and the GPU.
+// A galaxy's description and its per-point evaluation, shared by the host and the GPU.
 #ifndef STARSCAPE_FIELD_GALAXY_GLSL_H
 #define STARSCAPE_FIELD_GALAXY_GLSL_H
 
@@ -172,7 +172,6 @@ FIELD_CONST int kLargeGasOctaves = 4;
 FIELD_CONST uint64_t kRimMaskSalt = 0x81B1ul;
 FIELD_CONST uint64_t kRimWispSalt = 0x81B0ul;
 
-// Written as d * π / 180, not d * (π / 180): the CPU reference's bytes were cooked with this rounding.
 FIELD_INLINE real Radians(real d)
 {
 	return d * 3.14159265358979323846 / 180.0;

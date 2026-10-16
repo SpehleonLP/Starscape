@@ -40,7 +40,7 @@ include `include/kre_starscape.h` and read the file themselves.
   the light.
 - Physically checkable output: star counts, total flux and extinction match
   analytic expectations under machine-checked tests.
-- Deterministic: the same scene produces byte-identical output on any thread count.
+- Deterministic: the same scene produces byte-identical output on any thread count and in any run on the same GPU and driver.
 - Cook time is not a constraint. Correctness and quality are.
 
 ## Non-goals (this spec)
@@ -50,7 +50,6 @@ include `include/kre_starscape.h` and read the file themselves.
   value for it.
 - Placed or near nebulae: a 40° nebula looked right in a still frame but dominated the
   sky in a 3D viewer. The bubble rim is near gas admitted as part of the medium. Runtime grain, animated or time-varying skies.
-- A GPU implementation. The CPU cook is the reference.
 
 ## 1. Galaxy model
 
@@ -463,8 +462,10 @@ Points plus diffuse equal the full sky's light in expectation. Lowering
 All random draws use a counter-based generator (Philox 4×32-10) keyed on
 (seed, purpose, texel, bin, index). Noise fields are seeded per galaxy. No draw
 depends on thread scheduling, so output is byte-identical on any thread count.
-Work is distributed over texels with a shared atomic counter; each texel's
-results are written to its own slot.
+The march runs on the GPU (`docs/specs/2026-10-15-gpu-march.md`), one invocation
+per texel; the calibration and the star draws run on CPU threads, distributed over
+texels with a shared atomic counter, each texel's results written to its own slot.
+The bytes depend on the GPU and its driver, never on the run.
 
 ## 3. File format
 
@@ -539,9 +540,7 @@ The preview is rendered **from the cooked data**: the diffuse cubemap sampled
 bilinearly with seamless face edges, plus every star splatted as a Gaussian of
 FWHM 1.5 px. Each splat's weights are divided by their own sum and by each
 pixel's solid angle, so a star's integrated flux is exact at every latitude.
-`--exposure EV` scales by 2^EV. With `preview.march = true` the diffuse layer of
-the preview is instead marched at the preview's own resolution, for use as a
-standalone skybox elsewhere; the `.kre_starscape` is unchanged.
+`--exposure EV` scales by 2^EV.
 
 ## 4. Scene file and CLI
 
@@ -552,7 +551,7 @@ standalone skybox elsewhere; the `.kre_starscape` is unchanged.
 face_size    = 256
 target_stars = 4000           # or: limiting_magnitude = 6.5 (exactly one of the two)
 quality      = "final"        # or "quick"
-preview      = { width = 8192, march = false }
+preview      = { width = 8192 }
 
 [observer]
 position      = [8200.0, 0.0, 20.0]   # parsecs, scene frame
@@ -669,10 +668,10 @@ recorded in the test's comment.
 | Distant galaxy | Dust-free galaxy at 1 Mpc: total sky flux = Σ L · (10/d)² · 10^(−1.932) within 1 % | restore an unbounded density term |
 | Dust slab | Uniform slab of optical depth τ in front of a point source: per-channel flux ratio = exp(−k_c τ) within 0.5 % | apply k_G to all channels |
 | Inside a disk | Milky Way, observer at R = 8.2 kpc, z = 20 pc, 20 000 stars: mean diffuse radiance within 5° of the galactic plane ≥ 2× within 5° of the poles (the in-plane column is dust-limited to ~1/α ≈ 1 kpc against a polar column of 2h ≈ 600 pc plus the thick disk, so a ratio of 2–4 is expected; a flat disk inverts it, measured 0.075); point density per steradian within 10° of the plane vs above 60° latitude in [1.15, 4] (wider bands than the diffuse check so the counts are not noise-limited; a flat disk gives 0.85, dust thinning the plane) | replace the sech² with 1 |
-| Straddling-step conservation | One Milky Way ray: diffuse radiance + the expected light of the resolved points equals the all-diffuse radiance to 10⁻⁹, at thresholds 10⁻²…10⁻⁶ | drop the diffuse part beyond c_i of a straddling bin |
+| Straddling-step conservation | The shared step code (`AccumulatePart`, compiled in double) over a stepped ray through each Milky Way population: diffuse radiance + the expected light of the resolved points equals the all-diffuse radiance to 10⁻⁹, at thresholds 10⁻²…10⁻⁶ | drop the diffuse part beyond c_i of a straddling bin |
 | Orientation | A compact source along (0.3, 0.8, 0.52): the brightest diffuse texel (by the file's face table), the brightest preview pixels and the file's stars all lie on that direction | swap x and y when mapping a texel index to face coordinates |
 | Star-count bound | A tiny scene at `limiting_magnitude` = 25 is refused, quickly, naming the magnitude | remove the post-march bound |
-| Determinism | Quick cook with 1 thread and with 8 threads: byte-identical files | seed draws by thread index |
+| Determinism | Quick cook with 1 thread and with 8 threads, twice in one process and in two CLI runs: byte-identical files | seed draws by thread index; mix a clock into the march's jitter seed |
 | Format round trip | Write then `Parse`: every field and payload byte equal | — |
 | Format rejection | `Parse` rejects every truncation length, each offset/size pushed past EOF, overlapping regions, bad magic/version/encoding, mip count inconsistent with face size | delete any one validation check |
 | RGB9E5 | Encode/decode matches the Vulkan reference algorithm over a logarithmic sweep of 10⁶ values plus the edge cases (0, max, negative, NaN → 0) | wrong exponent bias |
@@ -709,7 +708,7 @@ recorded in the test's comment.
 
 ```
 Starscape/
-  CMakeLists.txt                 # C++23; targets: starscape, starscape-tests
+  CMakeLists.txt                 # C++23; targets: starscape, starscape-tests, starscape-gpu-tests, starscape-cook-tests
   include/kre_starscape.h        # public format + reader
   src/
     cli.cpp                      # argument parsing, top-level error printing
@@ -720,11 +719,14 @@ Starscape/
     common.h                     # Error, Expected, TRY macros
     noise.h/.cpp                 # gradient noise, fbm, ridged fbm
     rng.h                        # Philox 4x32-10
-    march.h/.cpp                 # intervals, per-ray march, flux histogram, star re-march
+    march.h/.cpp                 # intervals, calibration flux histogram, star re-march
     parallel.h                   # deterministic ParallelFor
-    cook.h/.cpp                  # calibration, texel march, Poisson star drawing
+    cook.h/.cpp                  # calibration, passes, Poisson star drawing
     writer.h/.cpp                # mips, file assembly, atomic rename
     preview.h/.cpp               # equirect render, splats, RGBE write
+    field/*.glsl.h               # the galaxy model and the march step, compiled as C++ and as GLSL
+    gpu/                         # Vulkan device, the GPU march, test-only probes
+  shaders/                       # march.comp and the GLSL it includes
   scenes/milky-way-from-earth.toml
   scenes/stylized-milky-way.toml # the fantastical look: gas glow, nebula layer, bolder dust, saturated stars
   third_party/                   # vendored single headers, versions in third_party/VERSIONS

@@ -25,7 +25,7 @@ namespace
 
 constexpr char const* kUsage =
 	"usage:\n"
-	"  starscape cook    <scene.toml> -o <out.kre_starscape> [--preview <out.hdr>] [--threads N] [--quick | --draft] [--width N] [--device auto|gpu|cpu]\n"
+	"  starscape cook    <scene.toml> -o <out.kre_starscape> [--preview <out.hdr>] [--threads N] [--quick | --draft] [--width N]\n"
 	"  starscape preview <in.kre_starscape> -o <out.hdr> [--width N] [--exposure EV] [--threads N]\n"
 	"  starscape inspect <in.kre_starscape>\n";
 
@@ -61,7 +61,6 @@ struct Arguments
 	bool draft = false;
 	std::optional<uint32_t> width;
 	double exposure = 0.0;
-	DeviceChoice device = DeviceChoice::Auto;
 };
 
 template<class T>
@@ -93,7 +92,7 @@ std::optional<std::string> ParseArguments(int argc, char** argv, Arguments& out)
 		{
 			out.draft = true;
 		}
-		else if (arg == "-o" || arg == "--preview" || arg == "--threads" || arg == "--width" || arg == "--exposure" || arg == "--device")
+		else if (arg == "-o" || arg == "--preview" || arg == "--threads" || arg == "--width" || arg == "--exposure")
 		{
 			std::optional<std::string_view> const v = value();
 			if (!v)
@@ -123,25 +122,6 @@ std::optional<std::string> ParseArguments(int argc, char** argv, Arguments& out)
 					return "--width needs an even integer from 16 to 65536";
 				}
 				out.width = width;
-			}
-			else if (arg == "--device")
-			{
-				if (*v == "auto")
-				{
-					out.device = DeviceChoice::Auto;
-				}
-				else if (*v == "gpu")
-				{
-					out.device = DeviceChoice::Gpu;
-				}
-				else if (*v == "cpu")
-				{
-					out.device = DeviceChoice::Cpu;
-				}
-				else
-				{
-					return std::format("--device needs auto, gpu or cpu, not '{}'", *v);
-				}
 			}
 			else
 			{
@@ -202,8 +182,6 @@ int Cook(Arguments const& args)
 	std::string lastPhase;
 	CookOptions options;
 	options.threads = args.threads;
-	options.device = args.device;
-	options.log = [](std::string_view line) { Log(line); };
 	if (args.quick || args.draft)
 	{
 		options.quality = Quality::Quick;
@@ -231,7 +209,7 @@ int Cook(Arguments const& args)
 	{
 		std::vector<uint8_t> const bytes = BuildFile(cooked, scene->hash);
 		STARSCAPE_TRY(WriteFileAtomic(std::string(*args.output), bytes));
-		if (args.preview && !scene->output.previewMarch)
+		if (args.preview)
 		{
 			kre_starscape::View view;
 			kre_starscape::Parse(bytes, view);
@@ -267,20 +245,6 @@ int Cook(Arguments const& args)
 	if (cooked.stats.droppedStars > 0)
 	{
 		Log(std::format("warning: {} drawn stars found nothing resolved on re-march and were dropped", cooked.stats.droppedStars));
-	}
-
-	if (args.preview && scene->output.previewMarch)
-	{
-		std::vector<uint8_t> const bytes = BuildFile(cooked, scene->hash);
-		kre_starscape::View view;
-		kre_starscape::Parse(bytes, view);
-		Image const image = RenderMarchedPreview(PrepareScene(*scene), params, view,
-			scene->output.previewWidth, 0.0, args.threads);
-		if (Expected<void> const written = WriteFileAtomic(std::string(*args.preview), EncodeRadiance(image)); !written)
-		{
-			return Report(written.error());
-		}
-		Log(std::format("wrote preview {} ({}x{})", *args.preview, image.width, image.height));
 	}
 	return 0;
 }
