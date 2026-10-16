@@ -285,10 +285,21 @@ TEST_CASE("Gas glow is dimmed by the dust in front of it")
 
 TEST_CASE("Gas adds diffuse light and leaves the stars alone")
 {
-	// Mutation: adding the gas to resolvedRadiance instead of radiance reddens this test.
+	// Mutation: adding any term (gas, large-scale, rim or reflection) to resolvedRadiance instead of
+	// radiance reddens this test. Every term is on at once, around a bubble both scenes share, so only the
+	// light terms differ between them.
 	Scene scene = MilkyWayScene({8200.0, 0.0, 20.0});
+	Galaxy& galaxy = scene.galaxies[0];
+	galaxy.dust.bubbleCenter = {8200.0, 0.0, 20.0};
+	galaxy.dust.bubbleRadius = 300.0;
+	galaxy.dust.bubbleHeight = 800.0;
 	PreparedScene const plain = PrepareScene(scene);
-	scene.galaxies[0].disk.gas.glow = 1.5;
+	galaxy.disk.gas.glow = 1.5;
+	galaxy.disk.gas.palette = {glm::dvec3(1.0, 0.18, 0.32), glm::dvec3(0.25, 1.0, 0.85)};
+	galaxy.disk.gas.paletteCount = 2;
+	galaxy.disk.gas.largeGlow = 1.5;
+	galaxy.dust.bubbleRim = 4.0;
+	galaxy.dust.reflection = 2.0;
 	PreparedScene const glowing = PrepareScene(scene);
 	CHECK(glowing.galaxies[0].galaxy.disk.gas.youngLight == doctest::Approx(Luminance(glowing.populations[0].lightBelow[kBins])));
 	MarchParams const params = ParamsFor(Quality::Quick);
@@ -305,4 +316,56 @@ TEST_CASE("Gas adds diffuse light and leaves the stars alone")
 	HistogramRay(plain, params, dir, 1.0, ha);
 	HistogramRay(glowing, params, dir, 1.0, hb);
 	CHECK(ha.count == hb.count);
+}
+
+TEST_CASE("Large-scale gas, the rim and reflection are dimmed by the dust in front of them")
+{
+	// Mutation: adding any one term to the gas outside the step's transmittance (e.g. straight into
+	// the radiance) leaves that term undimmed, and its section fails.
+	struct Light
+	{
+		char const* name;
+		void (*apply)(Galaxy&);
+	};
+	Light const lights[] = {
+		{"large", [](Galaxy& g) { g.disk.gas.largeGlow = 1.0; }},
+		{"rim", [](Galaxy& g) { g.dust.bubbleRim = 4.0; }},
+		{"reflection", [](Galaxy& g) { g.dust.reflection = 2.0; }},
+	};
+	for (Light const& light : lights)
+	{
+		CAPTURE(light.name);
+		Scene scene = BaseScene();
+		int const population = AddSingleBinPopulation(scene, 14);
+		Galaxy source;
+		source.position = {1.0e6, 0.0, 0.0};
+		source.disk = {.enabled = true, .density = 0.05, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 20000.0, .arms = {},
+			.population = population, .armPopulation = population, .youngFraction = 0.5};
+		// Faint dust with a bubble at the source's centre, so the rim and the reflection have something to light.
+		source.dust = {.enabled = true, .extinction = 1e-6, .scaleLength = 1e12, .scaleHeight = 1e12, .cutoff = 20000.0, .laneOffset = 0.0, .contrast = 1.0, .filament = 0.0,
+			.bubbleCenter = {0.0, 0.0, 0.0}, .bubbleRadius = 300.0, .bubbleHeight = 800.0};
+		scene.galaxies.push_back(source);
+		MarchParams const params = ParamsFor(Quality::Quick);
+		glm::dvec3 const dir(1.0, 0.0, 0.0);
+		auto termRadiance = [&](Scene const& base)
+		{
+			RayResult dark;
+			MarchRay(PrepareScene(base), params, dir, HUGE_VAL, 1.0, 1.0, dark);
+			Scene lit = base;
+			light.apply(lit.galaxies[0]);
+			RayResult glowing;
+			MarchRay(PrepareScene(lit), params, dir, HUGE_VAL, 1.0, 1.0, glowing);
+			return glowing.radiance - dark.radiance;
+		};
+		glm::dvec3 const clear = termRadiance(scene);
+		REQUIRE(Luminance(clear) > 0.0);
+		double const alpha = 0.002;
+		double const radius = 1000.0;
+		scene.galaxies.push_back(UniformDust(alpha, radius));
+		glm::dvec3 const dimmed = termRadiance(scene);
+		double const tau = alpha * (radius - scene.observer.sMin) / 1.0857;
+		CHECK(dimmed.x / clear.x == doctest::Approx(std::exp(-0.75 * tau)).epsilon(0.005).scale(0.0));
+		CHECK(dimmed.y / clear.y == doctest::Approx(std::exp(-1.00 * tau)).epsilon(0.005).scale(0.0));
+		CHECK(dimmed.z / clear.z == doctest::Approx(std::exp(-1.32 * tau)).epsilon(0.005).scale(0.0));
+	}
 }

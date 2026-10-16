@@ -1,5 +1,7 @@
 # The Earth scene pushed toward a fantastical look that keeps the galaxy's structure: darker, more
 # filamentary dust, bolder arms, young-star gas glowing red with teal cores, and more vivid star colour.
+# The nebula layer (palette, large-scale gas, bubble rim, dust reflection) follows
+# docs/images/2026-10-15-nebula-target.png.
 # Target: docs/images/2026-10-13-stylized-target.png. Galactic frame, as in milky-way-from-earth.toml.
 [output]
 face_size    = 256
@@ -25,9 +27,17 @@ seed   = 1
   # 1.5 reproduces the target: its prototype ran at 2.5 before the texture's mean (0.6045 here) was divided out.
   [galaxy.disk.gas]
   glow = 1.5
+  # The nebula layer (docs/images/2026-10-15-nebula-target.png): neighbouring clouds take different hues,
+  # and a second band of gas at giant-cloud scale fills the arms. large_glow is the spike's 1.5 times
+  # the field's mean (1.006899 at seed 1), which the cook now divides out.
+  palette            = [[1.0, 0.18, 0.32], [0.25, 1.0, 0.85], [1.0, 0.70, 0.22], [0.62, 0.30, 1.0]]
+  palette_wavelength = 1500.0
+  large_glow         = 1.51
+  large_wavelength   = 100.0
 
   [galaxy.dust]
-  bubble   = { center = [8200.0, 0.0, 20.0], radius = 300.0, height = 800.0 }
+  reflection = 2.0
+  bubble   = { center = [8200.0, 0.0, 20.0], radius = 300.0, height = 800.0, rim = 4.0 }
   contrast = 6.0
   filament = 3.5
 
