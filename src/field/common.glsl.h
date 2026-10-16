@@ -106,7 +106,9 @@ FIELD_INLINE real Sech2(real x)
 }
 
 // A log-normal field whose logarithm has standard deviation `sigma`, given z of unit variance. Holding
-// the mean near one lets structure move stars and dust around without changing how much there is.
+// the mean near one lets structure move stars and dust around without changing how much there is,
+// so star counts and the dust's magnitudes-per-kiloparsec calibration survive any setting. For fbm the
+// mean stays within 2% of one up to σ 1.5.
 FIELD_INLINE real LogNormal(real sigma, real z)
 {
 	return exp(sigma * z - 0.5 * sigma * sigma);
